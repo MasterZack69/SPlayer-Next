@@ -17,17 +17,15 @@
           inherit (pkgs) lib;
 
           electron = pkgs.electron_43;
-          nodejs = pkgs.nodejs_22;
-          pnpm = pkgs.pnpm_10;
 
-          splayer-next = pkgs.stdenv.mkDerivation (finalAttrs: {
+          splayer-next = pkgs.clangStdenv.mkDerivation (finalAttrs: {
             pname = "splayer-next";
-            version = "1.0.0-0900e25";
+            version = "1.0.0";
             src = ./.;
 
             pnpmDeps = pkgs.fetchPnpmDeps {
               inherit (finalAttrs) pname version src;
-              hash = lib.fakeHash;
+              hash = "sha256-ShW23NClwcML/ngpdPf3EQaTmnhLVDAdSOJ4GQGSfIg=";
               fetcherVersion = 4;
             };
 
@@ -37,22 +35,23 @@
 
             nativeBuildInputs = [
               pkgs.pnpmConfigHook
-              pnpm
-              nodejs
               pkgs.rustPlatform.cargoSetupHook
-              pkgs.cargo
+              pkgs.nodejs
+              pkgs.pnpm
               pkgs.rustc
+              pkgs.cargo
               pkgs.python3
+              pkgs.gnumake
+              pkgs.pkg-config
               pkgs.makeWrapper
               pkgs.copyDesktopItems
               pkgs.removeReferencesTo
-              pkgs.pkg-config
+              pkgs.autoPatchelfHook
             ];
 
             buildInputs = [
               electron
               pkgs.alsa-lib
-              pkgs.clang
               pkgs.ffmpeg-headless
               pkgs.libclang
             ];
@@ -60,12 +59,18 @@
             strictDeps = true;
             __structuredAttrs = true;
 
-            env.ELECTRON_SKIP_BINARY_DOWNLOAD = "1";
+            env = {
+              ELECTRON_SKIP_BINARY_DOWNLOAD = "1";
+
+              LIBCLANG_PATH = lib.makeLibraryPath [
+                pkgs.libclang.lib
+              ];
+            };
 
             postPatch = ''
               # Workaround for https://github.com/electron/electron/issues/31121
-              substituteInPlace electron/main/utils/native-loader.ts \
-                --replace-fail 'process.resourcesPath' "'$out/share/splayer/resources'"
+              substituteInPlace electron/main/utils/nativeLoader.ts \
+                --replace-fail 'process.resourcesPath' "'$out/share/splayer-next/resources'"
             '';
 
             buildPhase = ''
@@ -73,7 +78,7 @@
 
               for f in $(find . -path '*/node_modules/better-sqlite3' -type d); do
                 (cd "$f" && (
-                npm run build-release --offline --nodedir="${electron.headers}"
+                npm run build-release --offline -- --nodedir="${electron.headers}"
                 rm -rf build/Release/{.deps,obj,obj.target,test_extension.node}
                 find build -type f -exec \
                   ${lib.getExe pkgs.removeReferencesTo} \
@@ -88,7 +93,7 @@
                 -c.electronDist=${electron.dist} \
                 -c.electronVersion=${electron.version} \
                 -c.extraMetadata.version=v${finalAttrs.version} \
-                --config electron-builder.config.js
+                --config electron-builder.config.ts
 
               runHook postBuild
             '';
@@ -105,7 +110,7 @@
               done
 
               makeWrapper '${lib.getExe electron}' "$out/bin/splayer-next" \
-                --add-flags $out/share/splayer/resources/app.asar \
+                --add-flags $out/share/splayer-next/resources/app.asar \
                 --add-flags "\''${NIXOS_OZONE_WL:+\''${WAYLAND_DISPLAY:+--ozone-platform-hint=auto --enable-features=WaylandWindowDecorations --enable-wayland-ime=true --wayland-text-input-version=3}}" \
                 --set-default ELECTRON_FORCE_IS_PACKAGED 1 \
                 --set-default ELECTRON_IS_DEV 0 \
@@ -117,12 +122,12 @@
             desktopItems = [
               (pkgs.makeDesktopItem {
                 name = "splayer-next";
-                desktopName = "SPlayer-next";
+                desktopName = "SPlayer-Next";
                 exec = "splayer-next %U";
                 terminal = false;
                 type = "Application";
                 icon = "splayer-next";
-                startupWMClass = "SPlayer-next";
+                startupWMClass = "SPlayer-Next";
                 comment = "Cross-platform desktop music player with rich lyric support";
                 categories = [
                   "AudioVideo"
@@ -136,7 +141,7 @@
 
             meta = {
               description = "Cross-platform desktop music player with rich lyric support";
-              homepage = "https://splayer.imsyy.top";
+              homepage = "https://splayer-next.imsyy.top";
               license = lib.licenses.agpl3Only;
               platforms = lib.platforms.linux;
               mainProgram = "splayer-next";
