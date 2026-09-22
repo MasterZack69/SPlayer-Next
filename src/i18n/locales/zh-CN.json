@@ -82,6 +82,7 @@
     "reject": "不同意并退出"
   },
   "common": {
+    "back": "返回",
     "confirm": "确认",
     "cancel": "取消",
     "close": "关闭",
@@ -205,11 +206,51 @@
       "paste": "粘贴",
       "pasteSearch": "粘贴并搜索"
     },
+    "menu": {
+      "hideFromSidebar": "在侧边栏中隐藏",
+      "customizeSidebar": "自定义侧边栏"
+    },
     "link": {
       "song": "直接播放「{id}」",
       "album": "前往专辑「{id}」",
       "artist": "前往歌手「{id}」",
       "playlist": "前往歌单「{id}」"
+    }
+  },
+  "recognition": {
+    "title": "听歌识曲",
+    "entry": "听歌识曲",
+    "description": "识别正在播放的音乐",
+    "start": "开始识别",
+    "sourceLabel": "音频来源",
+    "hint": {
+      "system": "我们会采集系统中的一小段声音进行识别",
+      "microphone": "靠近声源并保持环境安静，识别效果会更好"
+    },
+    "source": {
+      "system": "系统声音",
+      "microphone": "麦克风"
+    },
+    "phase": {
+      "capturing": "正在收听…",
+      "fingerprinting": "正在生成指纹…",
+      "matching": "正在匹配曲库…"
+    },
+    "empty": "没有识别到歌曲，请靠近声源重试",
+    "retry": "再试一次",
+    "cancel": "取消",
+    "play": "播放",
+    "unavailable": "当前设备不支持听歌识曲",
+    "searching": "搜索此歌曲",
+    "error": {
+      "unsupported": "当前平台不支持本机采集",
+      "no-device": "未找到可用的音频设备",
+      "permission-denied": "缺少麦克风权限，请在系统设置中授权",
+      "capture-failed": "音频采集失败",
+      "silent-input": "没有采集到声音，请检查音频输出",
+      "network": "匹配服务不可用，请稍后重试",
+      "afp-unavailable": "音频指纹库不可用",
+      "unknown": "识别失败，请重试"
     }
   },
   "home": {
@@ -313,8 +354,8 @@
     }
   },
   "login": {
-    "qrTipWaiting": "请打开云音乐 APP 扫码登录",
-    "qrTipScanned": "扫描成功，请在客户端确认登录",
+    "qrTipWaiting": "请打开 APP 扫码登录",
+    "qrTipScanned": "扫描成功，请在 APP 中确认登录",
     "qrTipExpired": "二维码已过期，正在重试",
     "qrTipDone": "登录成功",
     "qrTipUnknown": "状态异常，请重试",
@@ -423,7 +464,10 @@
       "loading": "正在开启私人 FM…",
       "entered": "已开启私人 FM",
       "already": "已处于私人 FM",
-      "failed": "私人 FM 开启失败，请稍后重试"
+      "failed": "私人 FM 开启失败，请稍后重试",
+      "modeSettings": "私人 FM 模式选择",
+      "modeTooltip": "FM 模式与场景",
+      "modeSettingsTip": "选择喜好的推荐模式与场景"
     },
     "lyricOffset": {
       "title": "歌词偏移",
@@ -503,7 +547,7 @@
       "selected": "已选 {count} 首",
       "invert": "反选",
       "addToQueue": "添加到播放列表",
-      "download": "下载",
+      "download": "批量下载",
       "exit": "退出"
     },
     "delete": {
@@ -594,8 +638,7 @@
     "clearFinished": "清空已完成",
     "clearConfirmTitle": "清空已完成任务",
     "clearConfirmContent": "将从列表移除所有已完成和出错的任务记录，已下载的本地文件不会被删除。确认清空？",
-    "tabAll": "所有任务",
-    "tabActive": "下载中",
+    "tabActive": "待下载",
     "tabError": "下载出错",
     "tabDone": "已完成",
     "colStatus": "状态",
@@ -681,6 +724,8 @@
       "about": "关于软件"
     },
     "section": {
+      "platformLogin": "平台登录",
+      "platformConfig": "平台配置",
       "network": "网络代理",
       "aboutApp": "关于软件",
       "specialThanks": "特别致谢",
@@ -688,7 +733,6 @@
       "community": "社区与资讯",
       "update": "更新",
       "language": "语言",
-      "playback": "播放器",
       "playControl": "播放控制",
       "audioSource": "播放音源",
       "scrobble": "听歌打卡",
@@ -697,6 +741,7 @@
       "lyricExclude": "歌词排除",
       "lyricGeneral": "内容样式",
       "lyricDisplay": "显示效果",
+      "lyricAMLLOptimize": "歌词优化",
       "lyricSpring": "弹簧动画",
       "lyricLayout": "布局与透明度",
       "desktopLyric": "桌面歌词",
@@ -706,6 +751,8 @@
       "appearanceStyle": "外观风格",
       "layout": "布局",
       "font": "字体",
+      "playerBar": "播放栏",
+      "nowPlaying": "播放页",
       "media": "媒体控制",
       "device": "输出设备",
       "hotkeys": "快捷键",
@@ -751,13 +798,23 @@
       "label": "自动播放",
       "description": "加载歌曲后自动开始播放"
     },
-    "fuckDjMode": {
-      "label": "Fuck DJ Mode",
-      "description": "歌曲名字带有 DJ 抖音 0.9 0.8 网红 车载 热歌 慢摇 自动跳过"
+    "skipKeywordsSongs": {
+      "label": "跳过指定关键词歌曲",
+      "description": "检测到歌曲标题或歌手名包含指定关键词时自动跳过",
+      "button": "管理",
+      "enable": "启用跳过关键词歌曲",
+      "enableDesc": "播放时若命中关键词列表则自动跳至下一首"
     },
-    "uncensorProfanity": {
-      "label": "Fuck ** Mode",
-      "description": "把歌词里的 f**k 等屏蔽词还原为原词"
+    "skipKeywordsRules": {
+      "label": "关键词列表",
+      "description": "自定义需要跳过的歌曲关键词列表",
+      "button": "管理",
+      "hint": "当歌曲标题或歌手名包含以下关键词时将自动跳过",
+      "placeholder": "输入关键词",
+      "add": "添加",
+      "clear": "清空当前列表",
+      "empty": "尚未配置任何关键词",
+      "duplicate": "已存在该关键词"
     },
     "hideVipTag": {
       "label": "隐藏 VIP 标签",
@@ -774,6 +831,12 @@
     "rememberLastTrack": {
       "label": "记忆播放进度",
       "description": "启动时恢复上次歌曲的播放进度"
+    },
+    "searchPlayBehavior": {
+      "label": "搜索页播放行为",
+      "description": "设置在搜索页面双击歌曲时的播放与添加策略",
+      "current": "仅播放当前",
+      "all": "播放全部"
     },
     "showLyricInBar": {
       "label": "播放时显示歌词",
@@ -819,6 +882,21 @@
       "label": "输出设备",
       "description": "选择音频输出设备",
       "default": "系统默认"
+    },
+    "rememberDeviceVolume": {
+      "label": "独立设备音量记忆",
+      "description": "切换或插拔不同音频输出设备时，分别保存并恢复各自的音量大小"
+    },
+    "audioOutputMode": {
+      "label": "音频输出模式",
+      "description": "切换当前 Windows WASAPI 音频的输出模式",
+      "shared": "共享模式",
+      "exclusive": "WASAPI 独占模式",
+      "fallback": {
+        "deviceBusy": "设备无法以独占模式打开，已回退共享模式",
+        "formatUnsupported": "设备不支持独占模式所需的音频格式，已回退共享模式",
+        "unavailable": "独占模式暂不可用，已回退共享模式"
+      }
     },
     "pauseOnDeviceSwitch": {
       "label": "切换时暂停播放",
@@ -878,9 +956,32 @@
       "label": "自动升级歌词格式",
       "description": "当前歌词格式较低时，从其他平台获取更高级的格式覆盖"
     },
+    "preferPluginLyric": {
+      "label": "优先使用插件歌词",
+      "description": "开启后同时请求插件歌词，若返回更优格式则自动替换"
+    },
     "detectBackgroundLyrics": {
       "label": "自动识别背景歌词",
       "description": "根据括号识别背景人声，误判时可关闭"
+    },
+    "cjkTransform": {
+      "label": "繁简转换",
+      "description": "对歌词文本进行简繁中文或日文汉字转换",
+      "none": "不转换",
+      "s2t": "简体 → 繁体",
+      "t2s": "繁体 → 简体",
+      "s2tw": "简体 → 台湾正体",
+      "tw2s": "台湾正体 → 简体",
+      "s2hk": "简体 → 香港繁体",
+      "hk2s": "香港繁体 → 简体",
+      "s2twp": "简体 → 台湾正体",
+      "tw2sp": "台湾正体 → 简体",
+      "t2tw": "繁体 → 台湾正体",
+      "tw2t": "台湾正体 → 繁体",
+      "t2hk": "繁体 → 香港繁体",
+      "hk2t": "香港繁体 → 繁体",
+      "jp2t": "日本新字体 → 繁体",
+      "t2jp": "繁体 → 日本新字体"
     },
     "enableOnlineTTMLLyric": {
       "label": "启用在线 TTML 歌词",
@@ -975,7 +1076,13 @@
       "highResourceTitle": "高占用功能",
       "highResourceContent": "开启后可能明显增加内存与 CPU 占用，低配设备上或出现卡顿。确定开启吗？",
       "restartRequiredTitle": "需要重启应用",
-      "restartRequiredContent": "此设置需要重启应用后生效。确定保存并立即重启吗？"
+      "restartRequiredContent": "此设置需要重启应用后生效。确定保存并立即重启吗？",
+      "testChannelTitle": "切换到测试通道",
+      "testChannelContent": "Beta 与 Alpha 通道会提前收到测试版本，其中 Alpha 版本可能非常不稳定。确定切换吗？",
+      "kugouLoginVersionTitle": "切换 KG 登录版本",
+      "kugouLoginVersionContent": "切换后当前登录凭据与新版本不匹配，需退出登录并重新扫码，否则会员权益与高音质解析会失效。确定切换吗？",
+      "exclusiveModeTitle": "切换到独占模式",
+      "exclusiveModeContent": "独占模式绕过系统混音器，优先使用音源采样率与位深，适合外接 DAC / Hi-Fi 设备。播放器的音量、均衡器等处理仍然生效，不保证逐位无损输出。独占期间其他应用可能无法播放声音；独占不可用时会尝试共享模式，若设备被其他应用独占，共享模式也可能无法播放。确定切换吗？"
     },
     "useAMSpring": {
       "label": "弹簧动画调试开关",
@@ -1013,6 +1120,26 @@
       "label": "缩放强制软弹簧",
       "description": "启用后将强制使用较软的焦点行缩放弹簧动效"
     },
+    "amllCleanUnintentionalOverlaps": {
+      "label": "清洗时间重叠",
+      "description": "自动截断两行之间非刻意的微小时间重叠，避免多行同时高亮"
+    },
+    "amllTryAdvanceStartTime": {
+      "label": "提前入场动画",
+      "description": "尝试让歌词入场动画提前开始（最多 1 秒），使过渡更加平滑"
+    },
+    "amllSyncMainAndBackgroundLines": {
+      "label": "同步背景人声时间",
+      "description": "自动同步主歌词与背景人声的时间轴"
+    },
+    "amllNormalizeSpaces": {
+      "label": "规范化空格",
+      "description": "将歌词文本中的多个连续空格合并为单个空格"
+    },
+    "amllResetLineTimestamps": {
+      "label": "重设行时间戳",
+      "description": "将行级时间戳强制重设为字级时间戳范围"
+    },
     "autoCenterCover": {
       "label": "自动居中封面",
       "description": "无歌词时自动居中封面并隐藏歌词区域"
@@ -1048,17 +1175,25 @@
       "label": "显示翻译",
       "description": "显示歌词的翻译文本"
     },
-    "showRomanization": {
-      "label": "显示音译",
-      "description": "显示歌词的音译文本"
+    "showRuby": {
+      "label": "显示词内注音",
+      "description": "显示歌词中汉字词语的假名或拼音注音"
     },
-    "amllShowLineRomanization": {
+    "showRomanization": {
       "label": "显示逐行音译",
       "description": "显示歌词行的音译文本"
     },
-    "amllShowWordRomanization": {
+    "showWordRomanization": {
       "label": "显示逐词音译",
       "description": "在逐字歌词中，显示每个字词的音译文本"
+    },
+    "enableScale": {
+      "label": "歌词缩放",
+      "description": "聚焦播放行，非激活行轻微缩小"
+    },
+    "bgAlwaysBelow": {
+      "label": "背景歌词置于下方",
+      "description": "始终将背景和声歌词显示在主歌词行下方"
     },
     "enableWordHighlight": {
       "label": "逐字高亮",
@@ -1331,6 +1466,13 @@
       "solid": "纯色",
       "animation": "流体"
     },
+    "playerBgRenderer": {
+      "label": "渲染引擎",
+      "description": "选择流体背景渲染引擎",
+      "mesh": "网格渐变渲染器",
+      "isolation": "isolation 渲染器",
+      "pixi": "PixiJS 渲染器"
+    },
     "playerBgFlowSpeed": {
       "label": "流动速度",
       "description": "流体背景的动画流动速度"
@@ -1356,6 +1498,10 @@
       "description": "全屏播放器封面的呈现方式",
       "default": "默认",
       "fullscreen": "全屏封面"
+    },
+    "coverLyricRatio": {
+      "label": "封面/歌词占比",
+      "description": "播放页封面与歌词区域的宽度比例"
     },
     "themeMode": {
       "label": "主题模式",
@@ -1428,9 +1574,22 @@
       "label": "歌单显示封面",
       "description": "侧边栏的歌单项以歌单封面替代默认图标"
     },
-    "showStatsInSidebar": {
-      "label": "显示播放统计入口",
-      "description": "在侧边栏显示播放统计页面入口"
+    "sidebarCustomize": {
+      "label": "自定义侧边栏",
+      "description": "调整侧边栏导航项的分组、顺序与显示",
+      "hint": "拖动手柄调整顺序与分组，点击眼睛切换显示",
+      "nav": "导航项",
+      "groups": "歌单分组",
+      "group": "分组 {n}",
+      "addGroup": "新增分组",
+      "emptyGroup": "拖动导航项到此处",
+      "noPlaylists": "暂无歌单",
+      "keepEmptyDivider": "空分组保留分隔线",
+      "nameWithDivider": "分组名与分隔线叠加显示",
+      "showName": "在侧栏显示分组名",
+      "confirmResetTitle": "确认恢复默认？",
+      "confirmResetDesc": "分组、命名、排序与显隐都将重置为默认！",
+      "featureDisabled": "功能未开启"
     },
     "showQualitySwitch": {
       "label": "显示快捷音质切换",
@@ -1519,6 +1678,28 @@
         "disconnected": "已断开 Last.fm 连接"
       }
     },
+    "platformLogin": {
+      "title": "登录 {name} 账号",
+      "desc": "登录后可获取对应平台播放地址",
+      "loginWeb": "网页登录",
+      "loginQr": "扫码登录",
+      "loginQrQQ": "QQ 扫码登录",
+      "loginQrWX": "微信扫码登录",
+      "qrTitle": "扫码登录",
+      "manualCookie": "Cookie 登录",
+      "logout": "退出登录",
+      "logoutTitle": "退出 {name} 登录",
+      "logoutConfirm": "确定要退出当前 {name} 账号（{user}）吗？",
+      "cookieTitle": "设置 {name} Cookie",
+      "cookiePlaceholder": "请输入 Cookie",
+      "toast": {
+        "loginSuccess": "{name} 登录成功：{user}",
+        "loginFailed": "{name} 登录失败，请重试",
+        "logoutDone": "已退出 {name} 登录",
+        "cookieSuccess": "{name} Cookie 设置成功",
+        "cookieInvalid": "Cookie 无效，请检查后重试"
+      }
+    },
     "rememberWindowState": {
       "label": "记忆窗口状态",
       "description": "下次启动时恢复窗口的大小、位置和最大化状态"
@@ -1530,6 +1711,14 @@
     "autoCheckUpdate": {
       "label": "自动检查更新",
       "description": "启动后及定时在后台检查新版本"
+    },
+    "updateChannel": {
+      "label": "更新通道",
+      "description": "选择正式版、Beta 预览版、Alpha 内测版或 Nightly 持续构建更新",
+      "stable": "正式版",
+      "beta": "Beta 预览版",
+      "alpha": "Alpha 内测版",
+      "nightly": "Nightly 持续构建"
     },
     "checkUpdate": {
       "label": "检查更新",
@@ -1573,6 +1762,12 @@
     "neteaseRealIp": {
       "label": "使用真实IP地址",
       "description": "在海外或部分地区可能会受到限制，可开启此处尝试解决"
+    },
+    "kugouLoginVersion": {
+      "label": "KG 登录版本",
+      "description": "切换后需重新扫码登录",
+      "standard": "标准版",
+      "concept": "概念版"
     },
     "neteaseScrobbleEnabled": {
       "label": "启用听歌打卡",
@@ -2069,6 +2264,7 @@
     "SCAN_DIR_NOT_SELECTED": "未选择目录",
     "TAG_READ_FAILED": "读取标签失败",
     "TAG_WRITE_FAILED": "写入标签失败",
+    "MAX_CONSECUTIVE_FAILURES": "连续播放失败次数过多",
     "UNKNOWN": "操作失败"
   },
   "tagEditor": {

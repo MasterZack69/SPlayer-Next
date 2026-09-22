@@ -1,209 +1,661 @@
-//! 跨线程安全的音频输出
+//! 跨平台统一的音频输出（纯 cpal，无 rodio）。
 //!
-//! `cpal::Stream`（以及包装它的 `rodio::MixerDeviceSink`）是 `!Send` 的——
-//! cpal 文档明确要求 Stream 的创建、持有和 drop 都在同一线程上完成
-//! （macOS CoreAudio 是真雷区，Windows WASAPI / Linux ALSA 是契约要求）。
-//!
-//! 但 NAPI 的 async fn 跑在多线程 tokio runtime 上，`.await` 后 Future
-//! 可能在任意 worker thread 恢复，原本通过 `unsafe impl Send` 绕过类型系统的
-//! 做法在 macOS 上是真 UB，其它平台属于"现在凑合能跑"的契约违反。
-//!
-//! 本模块的做法：开一个专用 `audio-output-owner` 线程独占持有 `MixerDeviceSink`，
-//! 对外只暴露可跨线程克隆的 `Mixer`。
-//! Stream 在该线程上创建，在该线程上 drop，永远不会被跨线程访问。
+//! cpal 0.18 起各后端的 `Stream` 均为 `Send`，可直接由 `PlaybackHandle` 持有，
+//! 无需再为 `!Send` 做专用线程隔离。`AudioOutput` 只负责解析输出设备与配置：
+//! 设备采样率即播放重采样目标，每次加载/seek 音源时按该配置创建独立输出流。
 
-use std::sync::mpsc;
-use std::thread::{self, JoinHandle};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+use std::sync::Arc;
 
-use anyhow::{Context, Result};
-use rodio::cpal::{self, traits::DeviceTrait, traits::HostTrait};
-use rodio::{mixer::Mixer, DeviceSinkBuilder, MixerDeviceSink};
+use anyhow::{anyhow, Context, Result};
+use cpal::traits::{DeviceTrait, HostTrait};
+use cpal::{FromSample, Sample, SampleFormat, SizedSample, StreamConfig, SupportedStreamConfig};
 use tracing::{debug, info, warn};
 
 use crate::error::{AudioErrorKind, AudioResultExt};
-use crate::priority;
+use crate::source::DecoderSource;
 
-/// 持有音频输出的跨线程句柄。`Send`，可放进 `InnerPlayer` 而不需 `unsafe impl Send`。
+/// 输出失败回调：实时错误线程调用，只允许发送轻量事件。
+/// 禁止获取 `InnerPlayer` 锁、join 线程、枚举设备、创建新流或调用 NAPI async 方法。
+pub type OutputFailureCallback = Arc<dyn Fn() + Send + Sync + 'static>;
+
+/// 独占模式回退回调：参数为回退原因分类键（deviceBusy / formatUnsupported / unavailable），
+/// 由协商失败的工作线程调用，只允许发送轻量事件
+pub type ExclusiveFallbackCallback = Arc<dyn Fn(&str) + Send + Sync + 'static>;
+
+/// 平台输出流：共享模式走 cpal，Windows 独占模式走 WASAPI 专属流
+pub(crate) enum OutputStream {
+    Shared(cpal::Stream),
+    #[cfg(target_os = "windows")]
+    Exclusive(crate::wasapi_exclusive::ExclusiveStream),
+}
+
+/// 输出设备与配置句柄。`Send`，可放进 `InnerPlayer` 而不需 `unsafe impl Send`。
 ///
-/// 内部专用线程独占 `MixerDeviceSink`，drop 这个结构会通过 channel 通知线程退出，
-/// 线程退出时 drop `MixerDeviceSink`——确保 `cpal::Stream` 创建和销毁都在同一线程。
-///
-/// # Examples
-///
-/// ```ignore
-/// // 走系统默认设备
-/// let output = AudioOutput::new(None)?;
-/// let player = Player::connect_new(output.mixer());
-/// // player 可在任意线程上使用；output 持有的 cpal::Stream 始终在专用线程上
-/// ```
+/// 不持有输出流——输出流由每次加载音源时的 `PlaybackHandle::attach` 按此配置创建，
+/// 因此切歌时无需跨线程移交流，也天然避免新旧流重叠占用设备。
 pub struct AudioOutput {
-    mixer: Mixer,
-    /// 实际打开的输出流采样率
-    sample_rate: u32,
-    /// drop 这个 sender 会让 owner 线程的 recv 返回 Err，从而退出并释放 Stream
-    /// 包成 Option 是为了 Drop 里能 take() 出来显式 drop，从而在 join 前先关闭 channel
-    shutdown: Option<mpsc::Sender<()>>,
-    /// owner 线程句柄，Drop 时 join 等待 cpal stream 在该线程真正释放
-    thread: Option<JoinHandle<()>>,
+    device: cpal::Device,
+    config: SupportedStreamConfig,
+    /// Windows 独占模式协商结果；`Some` 时输出走 WASAPI 独占流
+    #[cfg(target_os = "windows")]
+    exclusive: Option<crate::wasapi_exclusive::ExclusiveFormat>,
+    /// 该输出流的单调代次，用于诊断和过滤销毁后迟到的流错误
+    generation: u64,
+    on_failure: OutputFailureCallback,
+    #[cfg(target_os = "windows")]
+    on_fallback: Option<ExclusiveFallbackCallback>,
 }
 
 impl AudioOutput {
-    /// 在专用线程上创建音频输出
+    /// 解析输出设备与配置
     ///
     /// # Arguments
-    /// * `device_name` - 输出设备名，`None` 走系统默认设备
+    /// * `device_id` - 输出设备 ID，`None` 走系统默认设备
+    /// * `requested_sample_rate` - 期望输出采样率；设备支持时按此速率打开（音源精确采样率），
+    ///   否则回退到设备默认配置。`None` 表示直接用设备默认配置
+    /// * `source_bits` - 音源位深，独占模式协商候选的优先依据
+    /// * `generation` - 输出流单调代次，见 [`AudioOutput`] 字段说明
+    /// * `on_failure` - 运行期流错误回调，见 [`OutputFailureCallback`]
+    /// * `exclusive` - 独占模式开关，`Some` 携带回退回调；协商失败时自动回退共享并上报
     ///
     /// # Errors
     /// - 找不到指定设备
     /// - 无可用音频设备
-    /// - 专用线程 spawn 失败
-    pub fn new(device_name: Option<&str>) -> Result<Self> {
-        let device_name = device_name.map(String::from);
-
-        // 把构建结果回传给调用线程；用 sync_channel 容量 1 避免发送方阻塞
-        let (result_tx, result_rx) = mpsc::sync_channel::<Result<(Mixer, u32)>>(1);
-        // 调用方 drop AudioOutput 时关闭，触发 owner 线程退出
-        let (shutdown_tx, shutdown_rx) = mpsc::channel::<()>();
-
-        let thread = thread::Builder::new()
-            .name("audio-output-owner".to_string())
-            .spawn(move || {
-                priority::boost_current_audio_thread("audio-output-owner");
-                debug!(device = ?device_name, "audio-output-owner: starting");
-                let build_result = build_output_sink(device_name.as_deref());
-                match build_result {
-                    Ok((mut sink, sample_rate)) => {
-                        sink.log_on_drop(false);
-                        if result_tx
-                            .send(Ok((sink.mixer().clone(), sample_rate)))
-                            .is_err()
-                        {
-                            // 调用方已放弃接收：在本线程 drop sink 后退出
-                            warn!("audio-output-owner: receiver dropped before handshake");
-                            drop(sink);
-                            return;
-                        }
-                        // 持有 sink，等待 shutdown 信号或 channel 关闭
-                        let _ = shutdown_rx.recv();
-                        debug!("audio-output-owner: shutting down, dropping cpal stream");
-                        drop(sink);
-                    }
-                    Err(err) => {
-                        warn!(error = %err, "audio-output-owner: build_output_sink failed");
-                        let _ = result_tx.send(Err(err));
-                    }
-                }
-            })
-            .context("failed to spawn audio-output-owner thread")
-            .with_audio_kind(AudioErrorKind::Device)?;
-
-        let (mixer, sample_rate) = result_rx
-            .recv()
-            .context("audio output owner thread terminated unexpectedly")
-            .with_audio_kind(AudioErrorKind::Device)??;
-
+    pub fn new(
+        device_id: Option<&str>,
+        requested_sample_rate: Option<u32>,
+        source_bits: Option<u32>,
+        generation: u64,
+        on_failure: OutputFailureCallback,
+        exclusive: Option<&ExclusiveFallbackCallback>,
+    ) -> Result<Self> {
+        let (device, config, exclusive_format) =
+            open_device(device_id, requested_sample_rate, source_bits, exclusive)
+                .with_audio_kind(AudioErrorKind::Device)?;
+        #[cfg(not(target_os = "windows"))]
+        let _ = exclusive_format;
+        #[cfg(target_os = "windows")]
+        if let Some(format) = exclusive_format {
+            info!(
+                id = device_id_string(&device).as_deref().unwrap_or("-"),
+                name = %device,
+                rate = format.sample_rate,
+                channels = format.channels,
+                bits = format.valid_bits,
+                "打开独占模式音频输出配置"
+            );
+        }
+        #[cfg(target_os = "windows")]
+        if exclusive_format.is_none() {
+            info!(
+                id = device_id_string(&device).as_deref().unwrap_or("-"),
+                name = %device,
+                sample_rate = config.sample_rate(),
+                "打开音频输出配置"
+            );
+        }
+        #[cfg(not(target_os = "windows"))]
+        info!(
+            id = device_id_string(&device).as_deref().unwrap_or("-"),
+            name = %device,
+            sample_rate = config.sample_rate(),
+            "打开音频输出配置"
+        );
         Ok(Self {
-            mixer,
-            sample_rate,
-            shutdown: Some(shutdown_tx),
-            thread: Some(thread),
+            device,
+            config,
+            #[cfg(target_os = "windows")]
+            exclusive: exclusive_format,
+            generation,
+            on_failure,
+            #[cfg(target_os = "windows")]
+            on_fallback: exclusive.cloned(),
         })
     }
 
-    /// 借出输出混音器，用于连接 `Player`
-    pub fn mixer(&self) -> &Mixer {
-        &self.mixer
+    /// 实际输出流采样率（播放重采样目标）
+    pub fn sample_rate(&self) -> u32 {
+        #[cfg(target_os = "windows")]
+        if let Some(format) = &self.exclusive {
+            return format.sample_rate;
+        }
+        self.config.sample_rate()
     }
 
-    /// 输出流采样率，作为播放重采样目标
-    pub fn sample_rate(&self) -> u32 {
-        self.sample_rate
+    /// 实际输出流声道数
+    pub fn channels(&self) -> u16 {
+        #[cfg(target_os = "windows")]
+        if let Some(format) = &self.exclusive {
+            return format.channels;
+        }
+        self.config.channels()
+    }
+
+    /// 实际开流失败时切换到共享格式；调用方必须按新格式重新创建样本缓冲。
+    pub(crate) fn fallback_to_shared(
+        &mut self,
+        error: &anyhow::Error,
+    ) -> Option<(ExclusiveFallbackCallback, &'static str)> {
+        #[cfg(target_os = "windows")]
+        if self.exclusive.take().is_some() {
+            let reason = crate::wasapi_exclusive::fallback_reason(error);
+            warn!(reason, error = %error, "独占模式开流失败，尝试共享模式");
+            return self.on_fallback.clone().map(|callback| (callback, reason));
+        }
+        let _ = error;
+        None
+    }
+
+    /// 按本配置创建一次播放的输出流，实时回调从 `source` 拉取样本。
+    /// 调用方持有返回的流，直到本次播放结束。
+    pub(crate) fn build_stream(
+        &self,
+        source: DecoderSource,
+        volume: Arc<AtomicU32>,
+        stopped: Arc<AtomicBool>,
+        paused: bool,
+    ) -> Result<OutputStream> {
+        #[cfg(target_os = "windows")]
+        if let Some(format) = self.exclusive {
+            let device_id = device_id_string(&self.device);
+            let on_failure = Arc::clone(&self.on_failure);
+            return run_in_mta(move || {
+                crate::wasapi_exclusive::open_exclusive_stream(
+                    device_id.as_deref(),
+                    format,
+                    source,
+                    volume,
+                    stopped,
+                    paused,
+                    on_failure,
+                )
+                .map(OutputStream::Exclusive)
+            })
+            .with_audio_kind(AudioErrorKind::Device);
+        }
+        #[cfg(not(target_os = "windows"))]
+        let _ = paused;
+        let device = self.device.clone();
+        let config = self.config;
+        let on_failure = Arc::clone(&self.on_failure);
+        run_in_mta(move || {
+            build_typed_stream_for_format(&device, &config, source, volume, stopped, on_failure)
+        })
+        .map(OutputStream::Shared)
+        .with_audio_kind(AudioErrorKind::Device)
     }
 }
 
 impl Drop for AudioOutput {
-    /// 确定性释放：先 drop 发送端通知 owner 线程退出，再 join 等待 cpal stream 真正释放
-    ///
-    /// 这样 `set_output_device` 等场景里新旧 stream 不会重叠占用设备，
-    /// 在 macOS / Linux 上避免 "device busy" 风险
     fn drop(&mut self) {
-        // 先 drop sender 让 owner 线程的 shutdown_rx.recv() 返回 Err 退出
-        drop(self.shutdown.take());
-        if let Some(thread) = self.thread.take() {
-            // 忽略 join 错误：owner 线程已经在 stream drop 时尽力清理过了
-            let _ = thread.join();
-        }
+        debug!(generation = self.generation, "释放音频输出配置");
     }
 }
 
-/// 构建 cpal/rodio 输出流；**仅在 `audio-output-owner` 线程内调用**，
-/// 保证 `MixerDeviceSink` 的创建、持有和 drop 都发生在同一线程上
+/// 常驻 MTA 工作线程，所有 cpal 调用都派给它执行。
 ///
-/// 始终使用设备默认配置打开流，返回实际采样率供播放重采样器与 DSP 使用。
-fn build_output_sink(device_name: Option<&str>) -> Result<(MixerDeviceSink, u32)> {
-    let host = cpal::default_host();
-    match device_name {
-        Some(name) => {
-            let device = host
-                .output_devices()
-                .context("Failed to enumerate output devices")?
-                .find(|device| persisted_device_name(device).as_deref() == Some(name))
-                .with_context(|| format!("Output device '{}' not found", name))
-                .with_audio_kind(AudioErrorKind::Device)?;
-            open_device_with_default_config(&device)
-        }
-        None => {
-            let sink = DeviceSinkBuilder::open_default_sink()
-                .context("Failed to open default output device")
-                .with_audio_kind(AudioErrorKind::Device)?;
-            let sample_rate = sink.config().sample_rate().get();
-            info!(sample_rate, "使用系统默认音频输出配置");
-            Ok((sink, sample_rate))
-        }
+/// cpal 的 `com_initialized()` 会把首次触碰的线程初始化成 STA；cpal 的
+/// `IMMDeviceEnumerator` 又是进程级单例，创建时所处的 apartment 决定它此后能否跨线程
+/// 安全使用。一条永不退出、永不 `CoUninitialize` 的 MTA 线程同时收口这两点，并保证进程
+/// MTA 不会在两次调用之间被拆掉——`AudioOutput` 持有的 `cpal::Device` 里缓存着在该
+/// apartment 里激活的 `IAudioClient`。
+#[cfg(target_os = "windows")]
+mod mta {
+    use std::panic::{catch_unwind, AssertUnwindSafe};
+    use std::sync::mpsc::{channel, sync_channel, SyncSender};
+    use std::sync::OnceLock;
+    use std::thread;
+
+    use anyhow::{anyhow, Result};
+    use windows::Win32::System::Com::{CoInitializeEx, COINIT_MULTITHREADED};
+
+    type Job = Box<dyn FnOnce() + Send + 'static>;
+
+    static WORKER: OnceLock<Option<SyncSender<Job>>> = OnceLock::new();
+
+    fn worker() -> Result<&'static SyncSender<Job>> {
+        WORKER
+            .get_or_init(|| {
+                let (job_tx, job_rx) = sync_channel::<Job>(1);
+                thread::Builder::new()
+                    .name("audio-mta-worker".into())
+                    .spawn(move || {
+                        let _ = unsafe { CoInitializeEx(None, COINIT_MULTITHREADED) };
+                        for job in job_rx {
+                            // cpal 的设备枚举路径上有 unwrap/expect，单个任务 panic 不能带走整条线程
+                            let _ = catch_unwind(AssertUnwindSafe(job));
+                        }
+                    })
+                    .ok()
+                    .map(|_| job_tx)
+            })
+            .as_ref()
+            .ok_or_else(|| anyhow!("启动 MTA 线程失败"))
+    }
+
+    /// 把 `f` 派给 MTA 线程执行并等待结果。调用按到达顺序串行执行
+    pub(super) fn run<T: Send + 'static>(
+        f: impl FnOnce() -> Result<T> + Send + 'static,
+    ) -> Result<T> {
+        let (result_tx, result_rx) = channel();
+        worker()?
+            .send(Box::new(move || {
+                let _ = result_tx.send(f());
+            }))
+            .map_err(|_| anyhow!("MTA 线程已退出"))?;
+        result_rx
+            .recv()
+            .map_err(|_| anyhow!("MTA 线程发生 panic"))?
     }
 }
 
-/// 设备名已被设置持久化为选择键，继续沿用旧 API 的值以避免升级后已有配置失效
-#[allow(deprecated)]
+#[cfg(target_os = "windows")]
+use mta::run as run_in_mta;
+
+#[cfg(not(target_os = "windows"))]
+fn run_in_mta<T, F: FnOnce() -> Result<T>>(f: F) -> Result<T> {
+    f()
+}
+
+/// 设备显示名：cpal 0.18 起 `Device::name()` 并入 `description().name()`。
+/// 可能重复、可被用户改名，只用于展示和旧配置回退匹配
 fn persisted_device_name(device: &cpal::Device) -> Option<String> {
-    device.name().ok()
+    device.description().ok().map(|desc| desc.name().to_owned())
 }
 
-/// 使用设备默认配置创建输出流
-fn open_device_with_default_config(device: &cpal::Device) -> Result<(MixerDeviceSink, u32)> {
-    let sink = DeviceSinkBuilder::from_device(device.clone())
-        .context("Failed to get default output config")?
-        .open_sink_or_fallback()
-        .context("Failed to open output device")
-        .with_audio_kind(AudioErrorKind::Device)?;
-    let sample_rate = sink.config().sample_rate().get();
-    info!(sample_rate, "使用设备默认音频输出配置");
-    Ok((sink, sample_rate))
+/// 设备稳定 ID：WASAPI 端点 ID / CoreAudio UID / PipeWire node.name，跨重启和改名都稳定
+fn device_id_string(device: &cpal::Device) -> Option<String> {
+    device.id().ok().map(|id| id.to_string())
 }
 
-/// 枚举所有输出设备，返回 `(name, is_default)` 列表
-/// 纯查询，不涉及 `!Send` 状态，调用方任意线程都能用
-pub fn list_output_devices() -> Vec<(String, bool)> {
-    let host = cpal::default_host();
-    let default_name = host
-        .default_output_device()
-        .and_then(|device| persisted_device_name(&device));
+/// cpal 的 PipeWire 后端会合成「跟随系统默认」的哨兵设备，它们不对应真实节点，
+/// 选择系统默认时由 `open_device(None)` 取用，不应混进给用户挑选的设备列表
+fn is_synthetic_default_device(name: &str) -> bool {
+    cfg!(target_os = "linux") && matches!(name, "default_output" | "default_sink")
+}
+
+/// 按选择器查找输出设备，优先按稳定 ID 匹配，失败后回退到显示名。
+///
+/// 回退是为 1.0.0 及更早版本存下的显示名配置准备的：命中后由 JS 侧改写成 ID。
+/// 显示名可能重复，回退路径取首个匹配，因此仅用于迁移，不作为长期身份。
+fn find_device(host: &cpal::Host, selector: &str) -> Option<cpal::Device> {
+    if let Ok(parsed) = selector.parse::<cpal::DeviceId>() {
+        return host.device_by_id(&parsed);
+    }
     host.output_devices()
-        .map(|devices| {
-            devices
-                .filter_map(|device| {
-                    let name = persisted_device_name(&device)?;
-                    let is_default = default_name.as_ref() == Some(&name);
-                    Some((name, is_default))
-                })
-                .collect()
-        })
-        .unwrap_or_default()
+        .ok()?
+        .find(|device| persisted_device_name(device).as_deref() == Some(selector))
+}
+
+/// 枚举所有输出设备，返回 `(id, name, is_default)` 列表
+/// 纯查询，不涉及流状态，调用方任意线程都能用
+pub fn list_output_devices() -> Vec<(String, String, bool)> {
+    run_in_mta(|| {
+        let host = cpal::default_host();
+        let default_id = host
+            .default_output_device()
+            .and_then(|device| device_id_string(&device));
+        let list = host
+            .output_devices()
+            .map(|devices| {
+                devices
+                    .filter_map(|device| {
+                        let name = persisted_device_name(&device)?;
+                        if is_synthetic_default_device(&name) {
+                            return None;
+                        }
+                        let id = device_id_string(&device)?;
+                        let is_default = default_id.as_deref() == Some(id.as_str());
+                        Some((id, name, is_default))
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        debug!(
+            default_id = default_id.as_deref().unwrap_or("-"),
+            devices = ?list,
+            "枚举音频输出设备"
+        );
+        Ok(list)
+    })
+    .unwrap_or_default()
 }
 
 /// 取系统默认输出设备名
 pub fn default_device_name() -> Option<String> {
-    cpal::default_host()
-        .default_output_device()
-        .and_then(|device| persisted_device_name(&device))
+    run_in_mta(|| {
+        let name = cpal::default_host()
+            .default_output_device()
+            .and_then(|device| persisted_device_name(&device));
+        Ok(name)
+    })
+    .unwrap_or_default()
+}
+
+/// 取系统默认输出设备稳定 ID，供主进程做切换检测（显示名可重复、可被改名）
+pub fn default_device_id() -> Option<String> {
+    run_in_mta(|| {
+        let id = cpal::default_host()
+            .default_output_device()
+            .and_then(|device| device_id_string(&device));
+        Ok(id)
+    })
+    .unwrap_or_default()
+}
+
+/// 独占模式协商结果类型：非 Windows 平台无此概念
+#[cfg(target_os = "windows")]
+type ExclusiveFormatOpt = Option<crate::wasapi_exclusive::ExclusiveFormat>;
+#[cfg(not(target_os = "windows"))]
+type ExclusiveFormatOpt = ();
+
+/// 按设备 ID（`None` 为默认设备）解析设备与输出配置。
+/// 设备支持 `requested_sample_rate` 时按该速率打开，否则使用设备默认配置。
+/// 样本格式优先沿用设备默认格式：PipeWire 等后端上报的 supported 列表包含
+/// 全部合成格式（顺序 I8…F64），首个条目不代表设备真实能力，直接采用会导致
+/// 以 i8 打开输出流而严重劣化音质。
+fn open_device_internal(
+    device_id: Option<&str>,
+    requested_sample_rate: Option<u32>,
+    source_bits: Option<u32>,
+    exclusive: Option<&ExclusiveFallbackCallback>,
+) -> Result<(cpal::Device, SupportedStreamConfig, ExclusiveFormatOpt)> {
+    let host = cpal::default_host();
+    let device = match device_id {
+        Some(selector) => {
+            find_device(&host, selector).with_context(|| format!("输出设备 '{selector}' 不存在"))?
+        }
+        None => {
+            let default = host.default_output_device().context("没有可用的输出设备")?;
+            let default_id = device_id_string(&default).context("读取默认输出设备 ID 失败")?;
+            find_device(&host, &default_id).context("解析默认输出设备端点失败")?
+        }
+    };
+    let default_config = device
+        .default_output_config()
+        .context("读取输出设备配置失败")?;
+
+    #[cfg(target_os = "windows")]
+    {
+        let _ = requested_sample_rate;
+        let mut exclusive_format = None;
+        if let Some(on_fallback) = exclusive {
+            // 独占模式：优先按音源采样率/位深协商，失败时回退共享并上报原因
+            match crate::wasapi_exclusive::negotiate_exclusive_format(
+                device_id_string(&device).as_deref(),
+                requested_sample_rate.unwrap_or(default_config.sample_rate()),
+                source_bits.unwrap_or(24),
+                default_config.channels(),
+            ) {
+                Ok(format) => exclusive_format = Some(format),
+                Err(error) => {
+                    warn!(reason = error.reason(), error = %error, "独占模式协商失败，回退共享模式");
+                    on_fallback(error.reason());
+                }
+            }
+        }
+        Ok((device, default_config, exclusive_format))
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = (source_bits, exclusive);
+        let config = match requested_sample_rate {
+            Some(rate) => {
+                if rate == default_config.sample_rate() {
+                    default_config
+                } else {
+                    let default_format = default_config.sample_format();
+                    let default_channels = default_config.channels();
+                    let at_rate = device.supported_output_configs().ok().and_then(|configs| {
+                        let configs: Vec<_> = configs.collect();
+                        configs
+                            .iter()
+                            .copied()
+                            .find(|range| {
+                                range.min_sample_rate() <= rate
+                                    && rate <= range.max_sample_rate()
+                                    && range.sample_format() == default_format
+                                    && range.channels() == default_channels
+                            })
+                            .or_else(|| {
+                                configs.iter().copied().find(|range| {
+                                    range.min_sample_rate() <= rate
+                                        && rate <= range.max_sample_rate()
+                                        && range.sample_format() == default_format
+                                })
+                            })
+                            .or_else(|| {
+                                configs.iter().copied().find(|range| {
+                                    range.min_sample_rate() <= rate
+                                        && rate <= range.max_sample_rate()
+                                        && range.channels() == default_channels
+                                })
+                            })
+                            .or_else(|| {
+                                configs.iter().copied().find(|range| {
+                                    range.min_sample_rate() <= rate
+                                        && rate <= range.max_sample_rate()
+                                })
+                            })
+                            .map(|range| range.with_sample_rate(rate))
+                    });
+                    at_rate.unwrap_or(default_config)
+                }
+            }
+            None => default_config,
+        };
+        Ok((device, config, ()))
+    }
+}
+
+fn open_device(
+    device_id: Option<&str>,
+    requested_sample_rate: Option<u32>,
+    source_bits: Option<u32>,
+    exclusive: Option<&ExclusiveFallbackCallback>,
+) -> Result<(cpal::Device, SupportedStreamConfig, ExclusiveFormatOpt)> {
+    let id_owned = device_id.map(String::from);
+    // 回退回调只在 MTA 工作线程被调用，Arc 在此克隆进闭包
+    let fallback_owned = exclusive.cloned();
+    run_in_mta(move || {
+        open_device_internal(
+            id_owned.as_deref(),
+            requested_sample_rate,
+            source_bits,
+            fallback_owned.as_ref(),
+        )
+    })
+}
+
+/// 按样本格式分发到类型化构建
+fn build_typed_stream_for_format(
+    device: &cpal::Device,
+    config: &SupportedStreamConfig,
+    source: DecoderSource,
+    volume: Arc<AtomicU32>,
+    stopped: Arc<AtomicBool>,
+    on_failure: OutputFailureCallback,
+) -> Result<cpal::Stream> {
+    let sample_format = config.sample_format();
+    let config: StreamConfig = config.config();
+    macro_rules! build {
+        ($sample:ty) => {
+            build_typed_stream::<$sample>(device, config, source, volume, stopped, on_failure)
+        };
+    }
+    match sample_format {
+        SampleFormat::I8 => build!(i8),
+        SampleFormat::I16 => build!(i16),
+        SampleFormat::I24 => build!(cpal::I24),
+        SampleFormat::I32 => build!(i32),
+        SampleFormat::I64 => build!(i64),
+        SampleFormat::U8 => build!(u8),
+        SampleFormat::U16 => build!(u16),
+        SampleFormat::U32 => build!(u32),
+        SampleFormat::U64 => build!(u64),
+        SampleFormat::F32 => build!(f32),
+        SampleFormat::F64 => build!(f64),
+        _ => Err(anyhow!("不支持的输出样本格式: {sample_format}")),
+    }
+}
+
+#[cfg(any(target_os = "linux", test))]
+fn format_pipewire_props(sample_rate: u32) -> String {
+    let mut props = serde_json::json!({
+        "application.id": "top.imsyy.splayer_next",
+        "application.name": "SPlayer-Next",
+        "application.icon-name": "top.imsyy.splayer_next",
+        "media.name": "Playback",
+    });
+    if sample_rate > 0 {
+        props["node.rate"] = format!("1/{sample_rate}").into();
+    }
+    props.to_string()
+}
+
+#[cfg(target_os = "linux")]
+mod pipewire_props {
+    use std::{
+        ffi::OsString,
+        sync::{Mutex, MutexGuard},
+    };
+
+    static ENV_LOCK: Mutex<()> = Mutex::new(());
+
+    pub(super) struct Guard {
+        original: Option<OsString>,
+        _lock: MutexGuard<'static, ()>,
+    }
+
+    impl Guard {
+        pub(super) fn set_stream_props(sample_rate: u32) -> Self {
+            let lock = ENV_LOCK.lock().unwrap_or_else(|err| err.into_inner());
+            let original = std::env::var_os("PIPEWIRE_PROPS");
+
+            // Linux PipeWire 下 cpal 构造流未携带 node.rate 属性与稳定应用元数据。
+            // 注入 node.rate 驱动硬件 DAC 切换时钟频率，注入 application.id 与固定 media.name 使 WirePlumber 能稳定记忆音量。
+            unsafe {
+                std::env::set_var("PIPEWIRE_PROPS", super::format_pipewire_props(sample_rate));
+            }
+
+            Self {
+                original,
+                _lock: lock,
+            }
+        }
+    }
+
+    impl Drop for Guard {
+        fn drop(&mut self) {
+            unsafe {
+                match self.original.take() {
+                    Some(value) => std::env::set_var("PIPEWIRE_PROPS", value),
+                    None => std::env::remove_var("PIPEWIRE_PROPS"),
+                }
+            }
+        }
+    }
+}
+
+fn build_typed_stream<T>(
+    device: &cpal::Device,
+    config: StreamConfig,
+    mut source: DecoderSource,
+    volume: Arc<AtomicU32>,
+    stopped: Arc<AtomicBool>,
+    on_failure: OutputFailureCallback,
+) -> Result<cpal::Stream>
+where
+    T: SizedSample + Sample + FromSample<f32>,
+{
+    let stream = {
+        #[cfg(target_os = "linux")]
+        let _props_guard = pipewire_props::Guard::set_stream_props(config.sample_rate);
+
+        device.build_output_stream(
+            config,
+            move |data: &mut [T], _| {
+                let gain = f32::from_bits(volume.load(Ordering::Relaxed));
+                if stopped.load(Ordering::Acquire) {
+                    data.fill(T::EQUILIBRIUM);
+                    return;
+                }
+                for output in data {
+                    *output = T::from_sample(source.next().unwrap_or(0.0) * gain);
+                }
+            },
+            move |error| {
+                let err_msg = error.to_string();
+                // 设备失效的两种上报文本：默认设备监听的 "no longer valid"，以及绑定端点被拔出时
+                // GetCurrentPadding 返回 0x88890004 (AUDCLNT_E_DEVICE_INVALIDATED) 的十进制 OS Error。
+                // 均属预期失效，重建即可
+                let invalidated =
+                    err_msg.contains("no longer valid") || err_msg.contains("-2004287484");
+                if invalidated {
+                    info!("音频输出流因设备切换失效，准备重建");
+                } else {
+                    warn!(%error, "音频输出流失败");
+                }
+                on_failure();
+            },
+            None,
+        )?
+    };
+    Ok(stream)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn hides_synthetic_default_devices_from_the_selectable_list() {
+        assert_eq!(
+            is_synthetic_default_device("default_output"),
+            cfg!(target_os = "linux")
+        );
+        assert_eq!(
+            is_synthetic_default_device("default_sink"),
+            cfg!(target_os = "linux")
+        );
+    }
+
+    #[test]
+    fn keeps_real_devices_in_the_selectable_list() {
+        assert!(!is_synthetic_default_device("Built-in Audio Analog Stereo"));
+        assert!(!is_synthetic_default_device("扬声器 (Realtek(R) Audio)"));
+    }
+
+    /// `find_device` 先按 `DeviceId` 解析、失败才回退显示名，旧配置存的显示名必须落到回退分支
+    #[test]
+    fn legacy_display_names_do_not_parse_as_device_ids() {
+        assert!("扬声器 (Realtek(R) Audio)"
+            .parse::<cpal::DeviceId>()
+            .is_err());
+        assert!("Built-in Audio Analog Stereo"
+            .parse::<cpal::DeviceId>()
+            .is_err());
+        assert!("AppleHDAEngineOutput:1B,0,1,0:0"
+            .parse::<cpal::DeviceId>()
+            .is_err());
+    }
+
+    #[test]
+    fn pipewire_props_includes_stable_identity_and_optional_rate() {
+        let props_with_rate = format_pipewire_props(96000);
+        assert!(props_with_rate.contains(r#""node.rate":"1/96000""#));
+        assert!(props_with_rate.contains(r#""application.id":"top.imsyy.splayer_next""#));
+        assert!(props_with_rate.contains(r#""application.name":"SPlayer-Next""#));
+        assert!(props_with_rate.contains(r#""application.icon-name":"top.imsyy.splayer_next""#));
+        assert!(props_with_rate.contains(r#""media.name":"Playback""#));
+
+        let props_without_rate = format_pipewire_props(0);
+        assert!(!props_without_rate.contains("node.rate"));
+        assert!(props_without_rate.contains(r#""application.id":"top.imsyy.splayer_next""#));
+        assert!(props_without_rate.contains(r#""application.name":"SPlayer-Next""#));
+        assert!(props_without_rate.contains(r#""application.icon-name":"top.imsyy.splayer_next""#));
+        assert!(props_without_rate.contains(r#""media.name":"Playback""#));
+    }
 }

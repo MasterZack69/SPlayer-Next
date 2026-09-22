@@ -2,18 +2,17 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::thread::JoinHandle;
 
-use anyhow::Result;
-use ffmpeg_audio::HttpCancelHandle;
-use parking_lot::Mutex;
-use rodio::Player as RodioPlayer;
-
 use crate::audio_output::AudioOutput;
 use crate::decoder;
 use crate::equalizer::Equalizer;
+use crate::fft::FftAnalyzer;
 use crate::metadata::AudioMetadata;
+use crate::playback::PlaybackHandle;
 use crate::shared::Shared;
-use crate::source::DecoderSource;
 use crate::tempo::StretchProcessor;
+use anyhow::Result;
+use ffmpeg_audio::HttpCancelHandle;
+use parking_lot::Mutex;
 
 use super::{InnerPlayer, PlayerEvent, PlayerState};
 
@@ -52,8 +51,13 @@ pub struct SeekTake {
     pub current_source: Option<String>,
     /// seek 前是否在播放（fallback 到 load 时保留状态）
     pub was_playing: bool,
-    /// 当前输出设备采样率（新 Shared 沿用，与复用的重采样器目标一致）
-    pub output_sample_rate: u32,
+    /// 当前音频源原始采样率
+    pub original_sample_rate: u32,
+    /// 当前音频源有效位深，独占模式重建协商候选的优先依据
+    pub original_bits: u32,
+    /// 输出配置随 seek 移交到工作线程，开流失败时允许回退共享格式
+    pub output: AudioOutput,
+    pub fft: Arc<FftAnalyzer>,
     /// 本次 seek 的 token，commit_seeked 时比对最新值，不一致说明已被新 load/seek/stop 取代
     pub token: u64,
     /// 解码侧 DSP 共享实例
@@ -67,17 +71,15 @@ pub struct LoadedPlayback {
     pub decode_handle: JoinHandle<decoder::DecoderData>,
     pub shared: Arc<Shared>,
     pub output: AudioOutput,
+    pub playback: Arc<PlaybackHandle>,
     pub cancel: Option<HttpCancelHandle>,
 }
 
 impl InnerPlayer {
     /// 给 NAPI 绑定层 async load 用：原子地发出停止信号 + take 所有旧线程 handle
     /// 调用方负责在工作线程 join 这些 handle，主线程持锁阶段不阻塞
-    /// 返回旧输出流供工作线程在打开新流前释放；token 用于校验本次 load 是否已被取代
-    pub fn take_for_async_load(
-        &mut self,
-        handle: HttpCancelHandle,
-    ) -> (OldThreads, Option<AudioOutput>, u64) {
+    /// 返回旧线程集合与本次 load 的 token（token 用于校验本次 load 是否已被取代）
+    pub fn take_for_async_load(&mut self, handle: HttpCancelHandle) -> (OldThreads, u64) {
         // 自增 token：本次 load 的标识；任何并发的更早 commit_loaded 比较时会发现不匹配
         let token = self.load_token.fetch_add(1, Ordering::AcqRel) + 1;
         if let Some(previous) = self.pending_load_handle.replace(handle) {
@@ -98,8 +100,8 @@ impl InnerPlayer {
         if let Some(ref shared) = self.shared {
             shared.stop();
         }
-        if let Some(sink) = self.sink.take() {
-            sink.stop();
+        if let Some(playback) = self.playback.take() {
+            playback.stop();
         }
         if let Some(ref shared) = self.shared {
             shared.drain_buffer();
@@ -117,7 +119,7 @@ impl InnerPlayer {
             fft_timer: self.fft_timer_handle.take(),
             fade_handle: self.fade_handle.take(),
         };
-        (old_threads, self.output.take(), token)
+        (old_threads, token)
     }
 
     /// token 是否仍是最新值（seek 失败回退到 load 前校验，避免复活已被取代的旧源）
@@ -153,6 +155,7 @@ impl InnerPlayer {
     /// 此时不做任何副作用——尤其不能 bump token，否则会误杀在途的 load
     pub fn take_for_async_seek(&mut self) -> Option<SeekTake> {
         self.decoder_thread.as_ref()?;
+        let output = self.output.take()?;
 
         // 与 load 共用同一 token 序列：commit_seeked 时比对，防止 seek 期间发生的
         // load/stop 完成后被本次 seek 的 commit 覆盖（旧曲复活 + 新解码线程泄漏）
@@ -171,8 +174,8 @@ impl InnerPlayer {
         if let Some(ref shared) = self.shared {
             shared.stop();
         }
-        if let Some(sink) = self.sink.take() {
-            sink.stop();
+        if let Some(playback) = self.playback.take() {
+            playback.stop();
         }
 
         let old_threads = OldThreads {
@@ -198,7 +201,10 @@ impl InnerPlayer {
             normalization_gain: norm_gain,
             current_source: self.current_source.clone(),
             was_playing: self.state == PlayerState::Playing,
-            output_sample_rate: self.output_sample_rate(),
+            original_sample_rate: self.original_sample_rate,
+            original_bits: self.original_bits,
+            output,
+            fft: Arc::clone(&self.fft),
             token,
             equalizer: Arc::clone(&self.equalizer),
             tempo: Arc::clone(&self.tempo),
@@ -207,6 +213,7 @@ impl InnerPlayer {
 
     /// seek 三段式的最后一段：主线程持锁，attach 新 sink + 新解码线程
     ///
+    /// `output` 为输出重建（`reinit_output`）时新建的输出，seek 本身传 `None` 沿用现有输出。
     /// 返回 false 表示本次 seek 已被更新的 load/seek/stop 取代，结果被丢弃
     pub fn commit_seeked(
         &mut self,
@@ -214,6 +221,8 @@ impl InnerPlayer {
         position_secs: f64,
         shared: Arc<Shared>,
         handle: JoinHandle<decoder::DecoderData>,
+        output: AudioOutput,
+        playback: Arc<PlaybackHandle>,
     ) -> Result<bool> {
         // 抢占检查：与 commit_loaded 同款，不一致则丢弃本次 seek 结果
         if token != self.load_token.load(Ordering::Acquire) {
@@ -223,30 +232,17 @@ impl InnerPlayer {
             return Ok(false);
         }
 
-        let sink = {
-            let output = self.ensure_output()?;
-            Arc::new(RodioPlayer::connect_new(output.mixer()))
-        };
-
-        let sample_rate = shared.sample_rate();
-        let decoder_source = DecoderSource::new(
-            Arc::clone(&shared),
-            Arc::clone(&self.fft),
-            sample_rate,
-            self.audio_channels,
-        );
-
         let was_paused = self.state == PlayerState::Paused;
-        sink.set_volume(self.target_volume);
-        if was_paused {
-            sink.pause();
+        if let Err(error) = playback.activate(self.target_volume, was_paused) {
+            shared.stop();
+            self.enter_paused_for_recovery();
+            return Err(error);
         }
-        sink.append(decoder_source);
+        self.output = Some(output);
 
-        self.sink = Some(sink);
+        self.playback = Some(playback);
         self.shared = Some(shared);
         self.decoder_thread = Some(handle);
-        self.audio_sample_rate = sample_rate;
         self.seek_base = position_secs;
 
         if was_paused {
@@ -283,6 +279,7 @@ impl InnerPlayer {
             decode_handle,
             shared,
             output,
+            playback,
             cancel,
         } = loaded;
         // 抢占检查：比对最新 token，不等说明已有更新的 load 在路上 / 已 commit
@@ -298,36 +295,25 @@ impl InnerPlayer {
             return Ok(None);
         }
 
+        if let Err(error) = playback.activate(self.target_volume, !auto_play) {
+            if let Some(handle) = cancel {
+                handle.cancel();
+            }
+            shared.stop();
+            return Err(error);
+        }
         self.pending_load_handle = cancel;
         self.output = Some(output);
 
-        let sink = {
-            let output = self.ensure_output()?;
-            Arc::new(RodioPlayer::connect_new(output.mixer()))
-        };
-
-        let decoder_source = DecoderSource::new(
-            Arc::clone(&shared),
-            Arc::clone(&self.fft),
-            metadata.sample_rate,
-            metadata.channels,
-        );
-
-        sink.set_volume(self.target_volume);
-        if !auto_play {
-            sink.pause();
-        }
-        sink.append(decoder_source);
-
-        self.sink = Some(sink);
+        self.playback = Some(playback);
         self.shared = Some(shared);
         self.decoder_thread = Some(decode_handle);
         self.seek_base = 0.0;
         self.current_source = Some(source.to_string());
 
-        self.audio_sample_rate = metadata.sample_rate;
-        self.audio_channels = metadata.channels;
         self.audio_duration = metadata.duration_secs;
+        self.original_sample_rate = metadata.original_sample_rate;
+        self.original_bits = metadata.bits_per_sample;
         self.cover_raw = metadata.cover_raw.take();
 
         if auto_play {

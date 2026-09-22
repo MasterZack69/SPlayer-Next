@@ -4,7 +4,12 @@
 export declare class AudioPlayer {
   /** 创建新的播放器实例 */
   constructor()
-  /** 重新初始化音频输出设备（系统休眠唤醒后调用） */
+  /**
+   * 重新初始化音频输出设备（系统休眠唤醒、设备热插拔或输出流错误后调用）
+   *
+   * 恢复为全成全败：新输出创建失败时不启动解码、不提交状态，保留当前曲目与位置，
+   * 播放器进入暂停态并返回设备错误；在线音源不会因设备错误触发 URL 重取或 sourceError。
+   */
   reinitOutput(): Promise<void>
   /** 设置封面缓存目录（在 load 前调用一次即可） */
   setCoverCacheDir(dir: string): void
@@ -12,8 +17,11 @@ export declare class AudioPlayer {
   onEvent(callback: (event: JsPlayerEvent) => void): void
   /** 当前平台是否支持原生音频设备监听 */
   supportsDeviceWatcher(): boolean
-  /** 注册系统音频设备变化回调，不支持的平台由主进程轮询 */
-  onDeviceChange(callback: () => void): void
+  /**
+   * 注册系统音频设备变化回调，不支持的平台由主进程轮询
+   * 回调参数为 true 表示默认输出设备切换，false 表示设备列表变化
+   */
+  onDeviceChange(callback: (defaultChanged: boolean) => void): void
   /** 停止系统音频设备变化监听 */
   stopDeviceWatcher(): void
   /**
@@ -21,9 +29,9 @@ export declare class AudioPlayer {
    * @param auto_play - 是否自动播放，false 时加载后立即暂停
    *
    * 异步三段式：
-   * 1. 主线程持锁瞬间（微秒级）：take 旧解码线程 handle + 拿参数（cover_dir / 归一化开关）
-   * 2. spawn_blocking 工作线程（**不持有 inner 引用**）：读取音源采样率、协商输出流并启动解码
-   * 3. 主线程持锁瞬间：提交输出流、构造 sink + attach + emit stateChanged
+   * 主线程只提取旧资源和配置，不在持锁时等待设备或解码 IO。
+   * 工作线程读取音源、打开暂停的输出流，按最终输出格式启动解码。
+   * 主线程校验代次后提交资源并恢复播放，过期任务的输出保持静音。
    * 持锁阶段都是纯内存操作，主线程其它同步 NAPI 调用最多等几微秒，不会被 IO 卡住
    */
   load(source: string, autoPlay?: boolean): Promise<JsMusicMetadata>
@@ -31,6 +39,8 @@ export declare class AudioPlayer {
   play(): Promise<void>
   /** 暂停播放 */
   pause(): void
+  /** 立即暂停播放，用于输出设备切换前阻止短暂串音 */
+  pauseImmediately(): void
   /** 停止播放并释放资源 */
   stop(): void
   /**
@@ -88,10 +98,22 @@ export declare class AudioPlayer {
   getOutputDevices(): Array<JsAudioDevice>
   /** 获取系统默认输出设备名称 */
   getDefaultDeviceName(): string | null
-  /** 切换输出设备（传 None/undefined 使用系统默认） */
-  setOutputDevice(deviceName?: string | undefined | null): Promise<void>
-  /** 获取当前选择的输出设备名称（None = 系统默认） */
+  /** 获取系统默认输出设备稳定 ID */
+  getDefaultDeviceId(): string | null
+  /** 切换输出设备（传设备 ID，None/undefined 使用系统默认） */
+  setOutputDevice(deviceId?: string | undefined | null): Promise<void>
+  /**
+   * 获取当前选择的输出设备 ID（None = 跟随系统默认）
+   *
+   * 旧配置存的是显示名，此处原样返回，由 `open_device` 回退解析
+   */
   getSelectedDeviceName(): string | null
+  /**
+   * 设置音频输出模式为 WASAPI 独占（仅 Windows 生效，立即重建设备）
+   *
+   * 设备被占用或格式不支持时自动回退共享模式，并通过 outputFallback 事件通知
+   */
+  setExclusiveMode(enabled: boolean): Promise<void>
   /** 设置播放速度（自动 clamp 到 [0.5, 2.0]） */
   setSpeed(speed: number): void
   /** 设置音调偏移（半音，自动 clamp 到 [-12, 12]） */
@@ -121,6 +143,9 @@ export declare function initLogger(logDir: string, isDev: boolean): void
 
 /** 音频输出设备信息 */
 export interface JsAudioDevice {
+  /** 稳定设备 ID（cpal `DeviceId` 的字符串形式） */
+  id: string
+  /** 显示名 */
   name: string
   /** 是否为系统默认设备 */
   isDefault: boolean
@@ -171,7 +196,7 @@ export interface JsMusicMetadata {
 
 /** 播放器事件，推送给 JS 侧 */
 export interface JsPlayerEvent {
-  /** 事件类型："stateChanged" | "ended" | "sourceError" | "position" | "fftData" | "outputStalled" */
+  /** 事件类型："stateChanged" | "ended" | "sourceError" | "position" | "fftData" | "outputStalled" | "outputFailed" | "outputFallback" */
   type: string
   /** 状态（仅 stateChanged 时有值） */
   state?: string
@@ -181,6 +206,8 @@ export interface JsPlayerEvent {
   duration?: number
   /** FFT 频谱数据（仅 fftData 时有值，128 个频段，值域 0.0 ~ 1.0） */
   fftData?: JsFftData
+  /** 回退原因分类键（仅 outputFallback 时有值：deviceBusy / formatUnsupported / unavailable） */
+  reason?: string
 }
 
 /** 播放器状态快照 */

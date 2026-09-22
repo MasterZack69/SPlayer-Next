@@ -10,7 +10,7 @@ import { useMultiSelect } from "@/composables/useMultiSelect";
 import { useDownload } from "@/composables/useDownload";
 import { useFavorite } from "@/composables/useFavorite";
 import { usePlaylistPicker } from "@/composables/usePlaylistPicker";
-import { PLAYER_BAR_GAP } from "@/composables/useFloatingPlayerBar";
+import { useFloatingPlayerBar } from "@/composables/useFloatingPlayerBar";
 import { formatTime } from "@/utils/time";
 import { formatFileSize } from "@/utils/format";
 import { isLosslessQuality, getQualityLabel } from "@/utils/quality";
@@ -80,15 +80,13 @@ const props = withDefaults(
 );
 
 const { t } = useI18n();
+const route = useRoute();
 const media = useMediaStore();
 const status = useStatusStore();
 const settings = useSettingsStore();
 const fav = useFavorite();
 
-/** 悬浮布局且播放栏可见时 */
-const isFloatingPlayerBar = computed(
-  () => settings.appearance.layoutMode === "floating" && !!media.track,
-);
+const { isFloatingBar: isFloatingPlayerBar, PLAYER_BAR_GAP } = useFloatingPlayerBar();
 
 /** 排序器 默认使用 base 敏感度，忽略大小写 */
 const textCollator = new Intl.Collator(undefined, {
@@ -270,6 +268,20 @@ const onListContextMenu = (event: MouseEvent): void => {
     event.preventDefault();
     event.stopPropagation();
   }
+};
+
+/**
+ * 双击歌曲项播放
+ * @param item - 歌曲数据
+ * @param index - 列表索引
+ */
+const onTrackDblClick = (item: Track, index: number): void => {
+  if (batch.active.value) return;
+  if (route.name === "search" && settings.player.searchPlayBehavior !== "all") {
+    void player.playNow(item, props.playbackContext);
+    return;
+  }
+  void player.playFrom(sortedItems.value, index, props.playbackContext);
 };
 
 const emit = defineEmits<{
@@ -514,11 +526,7 @@ defineExpose({
                     : 'bg-surface-panel border-primary/12 hover:border-primary/30 hover:bg-on-surface/8 active:bg-on-surface/12'
               "
               @click="batch.active.value ? batch.toggle(item.id) : undefined"
-              @dblclick="
-                batch.active.value
-                  ? undefined
-                  : player.playFrom(sortedItems, index, props.playbackContext)
-              "
+              @dblclick="onTrackDblClick(item, index)"
               @contextmenu="contextTrack = item"
             >
               <!-- 序号 / 多选 -->

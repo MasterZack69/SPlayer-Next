@@ -10,7 +10,7 @@ import {
   resolveWordByWord,
   type DisplayItem,
 } from "./utils";
-import { pickPrimaryIndex } from "@shared/utils/lyricSync";
+import { pickPrimaryIndex } from "lyric-kit";
 import { useNowPlayingSync } from "@windows/shared/composables/useNowPlayingSync";
 import { useDragWindow } from "./composables/useDragWindow";
 import { useHoverState } from "./composables/useHoverState";
@@ -46,6 +46,7 @@ const { track, lyric, playing, primaryIndex } = useNowPlayingSync({
 const cssDragEnabled = computed(() => config.useCSSDrag && isLinux);
 const { onRootPointerDown } = useDragWindow(() => config.locked || cssDragEnabled.value);
 const { isHovered } = useHoverState();
+const lockButton = ref<HTMLButtonElement | null>(null);
 
 /**
  * 占位行
@@ -199,14 +200,17 @@ const onHeaderAction = (
   }
 };
 
-// 锁定按钮鼠标进入事件：临时放开穿透以允许点击
-const onLockBtnEnter = (): void => {
-  if (config.locked) window.api.desktopLyric.setMouseIgnore(false);
-};
-
-// 锁定按钮鼠标离开事件：恢复穿透
-const onLockBtnLeave = (): void => {
-  if (config.locked) window.api.desktopLyric.setMouseIgnore(true);
+/** 向主进程上报解锁按钮命中区域，避免穿透窗口依赖 DOM 悬停事件自救 */
+const reportUnlockButtonBounds = (): void => {
+  const button = lockButton.value;
+  if (!button) return;
+  const bounds = button.getBoundingClientRect();
+  window.api.desktopLyric.setUnlockButtonBounds({
+    x: bounds.x,
+    y: bounds.y,
+    width: bounds.width,
+    height: bounds.height,
+  });
 };
 
 /** 配置变更订阅取消器 */
@@ -221,11 +225,15 @@ onMounted(async () => {
   }
   pushWindowHeight();
   unsubConfig = window.api.desktopLyric.onConfigChange((next) => Object.assign(config, next));
+  await nextTick();
+  reportUnlockButtonBounds();
+  window.addEventListener("resize", reportUnlockButtonBounds);
 });
 
 onBeforeUnmount(() => {
   unsubConfig?.();
   unsubConfig = null;
+  window.removeEventListener("resize", reportUnlockButtonBounds);
 });
 </script>
 
@@ -249,11 +257,7 @@ onBeforeUnmount(() => {
     </div>
     <div class="header">
       <div class="header-section header-left">
-        <button
-          class="header-btn logo-btn"
-          :title="track?.title ?? '回到主窗口'"
-          @click="onHeaderAction('focus-main')"
-        >
+        <button class="header-btn logo-btn" @click="onHeaderAction('focus-main')">
           <svg viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg">
             <path
               class="logo-primary"
@@ -275,36 +279,30 @@ onBeforeUnmount(() => {
         </div>
       </div>
       <div class="header-section header-center">
-        <button class="header-btn" title="上一曲" @click="onHeaderAction('prev')">
+        <button class="header-btn" @click="onHeaderAction('prev')">
           <IconLucideSkipBack />
         </button>
-        <button
-          class="header-btn"
-          :title="playing ? '暂停' : '播放'"
-          @click="onHeaderAction('toggle-play')"
-        >
+        <button class="header-btn" @click="onHeaderAction('toggle-play')">
           <IconLucidePause v-if="playing" />
           <IconLucidePlay v-else />
         </button>
-        <button class="header-btn" title="下一曲" @click="onHeaderAction('next')">
+        <button class="header-btn" @click="onHeaderAction('next')">
           <IconLucideSkipForward />
         </button>
       </div>
       <div class="header-section header-right">
-        <button class="header-btn" title="设置" @click="onHeaderAction('open-settings')">
+        <button class="header-btn" @click="onHeaderAction('open-settings')">
           <IconLucideSettings />
         </button>
         <button
+          ref="lockButton"
           class="header-btn lock-btn"
-          :title="config.locked ? '解锁窗口' : '锁定窗口'"
           @click="onHeaderAction('toggle-locked')"
-          @mouseenter="onLockBtnEnter"
-          @mouseleave="onLockBtnLeave"
         >
           <IconLucideUnlock v-if="config.locked" />
           <IconLucideLock v-else />
         </button>
-        <button class="header-btn" title="关闭桌面歌词" @click="onHeaderAction('close')">
+        <button class="header-btn" @click="onHeaderAction('close')">
           <IconLucideX />
         </button>
       </div>
@@ -490,6 +488,11 @@ onBeforeUnmount(() => {
 }
 .header-btn:active {
   background-color: rgba(255, 255, 255, 0.3);
+}
+.lock-btn {
+  width: 40px;
+  min-width: 40px;
+  height: 40px;
 }
 .song-info {
   flex: 1 1 auto;
