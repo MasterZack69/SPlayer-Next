@@ -5,7 +5,7 @@ use std::time::Duration;
 
 use super::events::playback_completion_event;
 use super::{InnerPlayer, PlayerEvent, PlayerState};
-use crate::playback::PlaybackHandle;
+use crate::output::playback::PlaybackHandle;
 
 /// 渐变步数
 const FADE_STEPS: u32 = 20;
