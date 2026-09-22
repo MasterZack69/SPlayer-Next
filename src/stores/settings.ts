@@ -93,23 +93,25 @@ const placeNavKeyByDefaults = (groups: SidebarNavGroup[], key: string): void => 
  * 对新增导航项做一次性位置校正：
  * 老存档会把新增项追加到末组，这里按默认布局移回相邻位置，之后不再改动
  * @param groups - 分组列表（就地修改）
- * @param placed - 已校正过的 key 存档
- * @returns 更新后的已校正 key 列表
+ * @param placed - 已执行过的校正记录 id 存档
+ * @returns 更新后的校正记录 id 列表
  */
 const applyNavPlacementFixes = (groups: SidebarNavGroup[], placed: unknown): string[] => {
   const done = new Set(
     (Array.isArray(placed) ? placed : []).filter((key): key is string => typeof key === "string"),
   );
-  for (const key of SIDEBAR_NAV_PLACEMENT_FIXES) {
-    if (done.has(key)) continue;
+  for (const fix of SIDEBAR_NAV_PLACEMENT_FIXES) {
+    if (done.has(fix.id)) continue;
     for (const group of groups) {
-      const position = group.keys.indexOf(key);
+      const position = group.keys.indexOf(fix.key);
       if (position >= 0) group.keys.splice(position, 1);
     }
-    placeNavKeyByDefaults(groups, key);
-    done.add(key);
+    placeNavKeyByDefaults(groups, fix.key);
+    done.add(fix.id);
   }
-  return [...done];
+  // 只保留当前仍在维护的校正记录，顺带清掉早期版本写入的无效标记
+  const known = new Set(SIDEBAR_NAV_PLACEMENT_FIXES.map((fix) => fix.id));
+  return [...done].filter((id) => known.has(id));
 };
 
 /**
@@ -159,7 +161,7 @@ export const useSettingsStore = defineStore(
         keys: [...group.keys],
       })),
       sidebarHiddenKeys: [],
-      sidebarNavPlaced: [...SIDEBAR_NAV_PLACEMENT_FIXES],
+      sidebarNavPlacementFixes: [],
       sidebarKeepEmptyDivider: false,
       sidebarNameWithDivider: false,
       sidebarPlaylistOrder: { myLocal: [], myOnline: [], subscribed: [] },
@@ -423,9 +425,9 @@ export const useSettingsStore = defineStore(
         lyric.lyricSourceOrder = reconcileOrder(lyric.lyricSourceOrder, ALL_PLATFORMS);
         lyric.lyricFormatOrder = reconcileOrder(lyric.lyricFormatOrder, DEFAULT_LYRIC_FORMAT_ORDER);
         appearance.sidebarNavGroups = reconcileNavGroups(appearance.sidebarNavGroups ?? []);
-        appearance.sidebarNavPlaced = applyNavPlacementFixes(
+        appearance.sidebarNavPlacementFixes = applyNavPlacementFixes(
           appearance.sidebarNavGroups,
-          appearance.sidebarNavPlaced,
+          appearance.sidebarNavPlacementFixes,
         );
         appearance.sidebarHiddenKeys = reconcileHiddenKeys(appearance.sidebarHiddenKeys ?? []);
         appearance.sidebarPlaylistOrder = reconcilePlaylistOrder(appearance.sidebarPlaylistOrder);

@@ -316,7 +316,8 @@ onBeforeUnmount(() => {
                     {{ collection.description }}
                   </span>
                 </SButton>
-                <p v-else class="text-sm text-on-surface-variant/70 truncate">
+                <!-- 流派按标签聚合，没有简介概念，不显示占位文案 -->
+                <p v-else-if="type !== 'genre'" class="text-sm text-on-surface-variant/70 truncate">
                   {{ t("collection.noDescription") }}
                 </p>
                 <div
