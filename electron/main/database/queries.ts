@@ -307,14 +307,15 @@ export const getGenreList = (): GenreSummary[] => {
   const rows = getDb()
     .prepare(
       `SELECT
-         json_extract(g.value, '$') AS name,
+         MIN(g.value) AS name,
          COUNT(DISTINCT t.id) AS trackCount,
          MAX(CASE WHEN t.cover IS NOT NULL THEN t.cover END) AS cover
-       FROM tracks t, json_each(t.genres) g
-       WHERE json_extract(g.value, '$') IS NOT NULL
-         AND TRIM(json_extract(g.value, '$')) != ''
+       FROM tracks t, json_each(COALESCE(NULLIF(t.genres, ''), '[]')) g
+       WHERE g.value IS NOT NULL
+         AND TRIM(g.value) != ''
          AND ${excludeCueContainer("t.path")}
-       GROUP BY LOWER(name)`,
+       GROUP BY LOWER(g.value)
+       ORDER BY trackCount DESC, name`,
     )
     .all() as { name: string; trackCount: number; cover: string | null }[];
   return rows.map((row) => ({
@@ -328,8 +329,8 @@ export const getGenreList = (): GenreSummary[] => {
 export const getGenreTracks = (genreName: string): Track[] => {
   const rows = getDb()
     .prepare(
-      `SELECT DISTINCT t.* FROM tracks t, json_each(t.genres) g
-       WHERE LOWER(json_extract(g.value, '$')) = LOWER(?)
+      `SELECT DISTINCT t.* FROM tracks t, json_each(COALESCE(NULLIF(t.genres, ''), '[]')) g
+       WHERE LOWER(g.value) = LOWER(?)
          AND ${excludeCueContainer("t.path")}`,
     )
     .all(genreName) as TrackRow[];
@@ -390,6 +391,16 @@ export const getLibraryStats = (): LibraryStats => {
     )
     .get() as { count: number };
 
+  const genreRow = d
+    .prepare(
+      `SELECT COUNT(DISTINCT LOWER(g.value)) AS count
+       FROM tracks t, json_each(COALESCE(NULLIF(t.genres, ''), '[]')) g
+       WHERE g.value IS NOT NULL
+         AND TRIM(g.value) != ''
+         AND ${excludeCueContainer("t.path")}`,
+    )
+    .get() as { count: number };
+
   const codecs = d
     .prepare(
       `SELECT COALESCE(codec, '') AS codec, COUNT(*) AS count
@@ -404,10 +415,23 @@ export const getLibraryStats = (): LibraryStats => {
     trackCount: aggregate.trackCount,
     albumCount: albumRow.count,
     artistCount: artistRow.count,
+    genreCount: genreRow.count,
     totalDurationMs: aggregate.totalDurationMs,
     totalFileSize: aggregate.totalFileSize,
     codecs,
   };
+};
+
+/**
+ * 是否存在尚未解析过流派的曲目
+ * 空值（NULL 或空串）表示该曲目还没解析过流派，用于触发一次全量扫描回填历史曲目
+ * @returns 存在待回填曲目时返回 true
+ */
+export const hasTracksMissingGenres = (): boolean => {
+  const row = getDb()
+    .prepare("SELECT EXISTS(SELECT 1 FROM tracks WHERE genres IS NULL OR genres = '') AS missing")
+    .get() as { missing: number };
+  return row.missing === 1;
 };
 
 /** 按 ID 批量获取曲目 */

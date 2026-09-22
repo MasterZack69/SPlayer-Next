@@ -518,6 +518,7 @@
   "songList": {
     "title": "Title",
     "album": "Album",
+    "genre": "Genre",
     "actions": "Actions",
     "size": "Size",
     "duration": "Duration",
@@ -2241,6 +2242,7 @@
     "songs": "Songs",
     "albums": "Albums",
     "artists": "Artists",
+    "genres": "Genres",
     "totalDuration": "Total Duration",
     "totalSize": "Total Size",
     "topSongs": "Most Played Songs",

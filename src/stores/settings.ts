@@ -11,6 +11,7 @@ import {
   DEFAULT_LYRIC_FORMAT_ORDER,
   DEFAULT_LYRIC_SOURCE_ORDER,
   DEFAULT_SIDEBAR_NAV_GROUPS,
+  SIDEBAR_NAV_PLACEMENT_FIXES,
   SIDEBAR_GROUP_MY_PLAYLISTS,
   SIDEBAR_GROUP_SUBSCRIBED,
   SPRING_PRESETS,
@@ -62,9 +63,53 @@ const reconcileNavGroups = (stored: unknown): SidebarNavGroup[] => {
   }
   if (groups.length === 0)
     return DEFAULT_SIDEBAR_NAV_GROUPS.map((group) => ({ ...group, keys: [...group.keys] }));
-  const missing = all.filter((key) => !seen.has(key));
-  if (missing.length > 0) groups[groups.length - 1].keys.push(...missing);
+  // 新增项按默认布局插到相邻项后面（如「流派」跟在「专辑」之后），找不到锚点才追加到末组
+  for (const key of all.filter((item) => !seen.has(item))) {
+    placeNavKeyByDefaults(groups, key);
+  }
   return groups;
+};
+
+/**
+ * 把导航项移动到默认布局中的相邻位置（锚定前一个默认项）
+ * @param groups - 分组列表（就地修改）
+ * @param key - 待放置的导航项
+ */
+const placeNavKeyByDefaults = (groups: SidebarNavGroup[], key: string): void => {
+  const all = DEFAULT_SIDEBAR_NAV_GROUPS.flatMap((group) => group.keys);
+  for (let index = all.indexOf(key) - 1; index >= 0; index--) {
+    const anchor = all[index];
+    for (const group of groups) {
+      const position = group.keys.indexOf(anchor);
+      if (position < 0) continue;
+      group.keys.splice(position + 1, 0, key);
+      return;
+    }
+  }
+  groups[groups.length - 1].keys.push(key);
+};
+
+/**
+ * 对新增导航项做一次性位置校正：
+ * 老存档会把新增项追加到末组，这里按默认布局移回相邻位置，之后不再改动
+ * @param groups - 分组列表（就地修改）
+ * @param placed - 已校正过的 key 存档
+ * @returns 更新后的已校正 key 列表
+ */
+const applyNavPlacementFixes = (groups: SidebarNavGroup[], placed: unknown): string[] => {
+  const done = new Set(
+    (Array.isArray(placed) ? placed : []).filter((key): key is string => typeof key === "string"),
+  );
+  for (const key of SIDEBAR_NAV_PLACEMENT_FIXES) {
+    if (done.has(key)) continue;
+    for (const group of groups) {
+      const position = group.keys.indexOf(key);
+      if (position >= 0) group.keys.splice(position, 1);
+    }
+    placeNavKeyByDefaults(groups, key);
+    done.add(key);
+  }
+  return [...done];
 };
 
 /**
@@ -114,6 +159,7 @@ export const useSettingsStore = defineStore(
         keys: [...group.keys],
       })),
       sidebarHiddenKeys: [],
+      sidebarNavPlaced: [...SIDEBAR_NAV_PLACEMENT_FIXES],
       sidebarKeepEmptyDivider: false,
       sidebarNameWithDivider: false,
       sidebarPlaylistOrder: { myLocal: [], myOnline: [], subscribed: [] },
@@ -377,6 +423,10 @@ export const useSettingsStore = defineStore(
         lyric.lyricSourceOrder = reconcileOrder(lyric.lyricSourceOrder, ALL_PLATFORMS);
         lyric.lyricFormatOrder = reconcileOrder(lyric.lyricFormatOrder, DEFAULT_LYRIC_FORMAT_ORDER);
         appearance.sidebarNavGroups = reconcileNavGroups(appearance.sidebarNavGroups ?? []);
+        appearance.sidebarNavPlaced = applyNavPlacementFixes(
+          appearance.sidebarNavGroups,
+          appearance.sidebarNavPlaced,
+        );
         appearance.sidebarHiddenKeys = reconcileHiddenKeys(appearance.sidebarHiddenKeys ?? []);
         appearance.sidebarPlaylistOrder = reconcilePlaylistOrder(appearance.sidebarPlaylistOrder);
       },
