@@ -14,7 +14,7 @@ import {
 import { broadcast } from "@main/utils/broadcast";
 import { toCacheUrl } from "@main/utils/protocol";
 import { toMs } from "@main/utils/time";
-import { parseArtists, parseAlbum } from "@main/utils/metadata";
+import { parseArtists, parseAlbum, parseGenres } from "@main/utils/metadata";
 import { getCoverCacheDir, isWin } from "@main/utils/config";
 import { libraryLog } from "@main/utils/logger";
 import { getCueAudioPath, parseCueSheet, extractCuePath } from "./cue";
@@ -41,6 +41,7 @@ export const scannedToUpsert = (track: JsScannedTrack): UpsertTrack => {
     track: track.track,
     artists: parseArtists(track.artist ?? ""),
     album: parseAlbum(track.album ?? ""),
+    genres: parseGenres(track.genre),
     duration: toMs(track.duration),
     cover: toCacheUrl(track.cover),
     codec: track.codec,
@@ -110,6 +111,7 @@ const syncCueTracks = async (
           track: cueTrack.track,
           artists: cueTrack.artists,
           album: cueTrack.album,
+          genres: cueTrack.genres,
           duration: cueTrack.duration,
           cover: audio.cover,
           codec: audio.quality?.codec,

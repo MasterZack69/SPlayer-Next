@@ -2151,6 +2151,7 @@
     "viewIntroduction": "查看完整简介",
     "album": "专辑",
     "playlist": "歌单",
+    "genre": "流派",
     "radio": "电台",
     "scope": {
       "local": "本地",
@@ -2188,6 +2189,11 @@
         "copyId": "复制歌单 ID",
         "copyUrl": "分享歌单链接"
       },
+      "genre": {
+        "copyTitle": "复制流派名称",
+        "copyId": "复制流派 ID",
+        "copyUrl": "分享流派链接"
+      },
       "radio": {
         "copyTitle": "复制电台名称",
         "copyId": "复制电台 ID",
@@ -2208,6 +2214,11 @@
   },
   "album": {
     "label": "专辑"
+  },
+  "genre": {
+    "label": "流派",
+    "totalGenres": "共 {count} 种",
+    "unknown": "未知流派"
   },
   "folder": {
     "label": "文件夹",

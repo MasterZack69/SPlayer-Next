@@ -1,6 +1,6 @@
 import path from "node:path";
 import type { Track, Artist, Album, AudioQuality } from "@shared/types/player";
-import type { AlbumSummary, ArtistSummary } from "@shared/types/library";
+import type { AlbumSummary, ArtistSummary, GenreSummary } from "@shared/types/library";
 import type { LibraryStats } from "@shared/types/stats";
 import { getDb } from "./index";
 
@@ -16,6 +16,7 @@ interface TrackRow {
   track?: number;
   artists: string;
   album: string | null;
+  genres: string | null;
   duration: number;
   cover: string | null;
   codec: string | null;
@@ -54,6 +55,7 @@ const rowToTrack = (row: TrackRow): Track => {
     track: row.track ?? undefined,
     artists: JSON.parse(row.artists) as Artist[],
     album: row.album ? (JSON.parse(row.album) as Album) : undefined,
+    genres: row.genres ? (JSON.parse(row.genres) as string[]) : [],
     duration: row.duration,
     cover: row.cover ?? undefined,
     fileSize: row.file_size ?? undefined,
@@ -131,6 +133,8 @@ export interface UpsertTrack {
   track?: number;
   artists: Artist[];
   album?: Album;
+  /** 流派列表（已解析拆分） */
+  genres?: string[];
   duration: number;
   cover?: string;
   codec?: string;
@@ -149,9 +153,9 @@ export const upsertTracks = (tracks: UpsertTrack[]): void => {
   const d = getDb();
   const stmt = d.prepare(`
     INSERT OR REPLACE INTO tracks
-      (id, path, cue_path, cue_audio_path, cue_start_ms, cue_end_ms, title, track, artists, album, duration, cover, codec, sample_rate, bit_rate, channels, bits_per_sample, file_size, file_mtime, file_ctime, scanned_at)
+      (id, path, cue_path, cue_audio_path, cue_start_ms, cue_end_ms, title, track, artists, album, genres, duration, cover, codec, sample_rate, bit_rate, channels, bits_per_sample, file_size, file_mtime, file_ctime, scanned_at)
     VALUES
-      (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
   const now = Date.now();
   const tx = d.transaction(() => {
@@ -167,6 +171,7 @@ export const upsertTracks = (tracks: UpsertTrack[]): void => {
         t.track ?? null,
         JSON.stringify(t.artists),
         t.album ? JSON.stringify(t.album) : null,
+        JSON.stringify(t.genres ?? []),
         t.duration,
         t.cover ?? null,
         t.codec ?? null,
@@ -217,15 +222,17 @@ export const deleteTracksByPaths = (paths: string[]): void => {
   tx();
 };
 
-/** 模糊搜索曲目（title / artists / album） */
+/** 模糊搜索曲目（title / artists / album / genres） */
 export const searchTracks = (query: string): Track[] => {
   const escaped = query.replace(/[%_\\]/g, "\\$&");
   const pattern = `%${escaped}%`;
   const rows = getDb()
     .prepare(
-      `SELECT * FROM tracks WHERE (title LIKE ? ESCAPE '\\' OR artists LIKE ? ESCAPE '\\' OR album LIKE ? ESCAPE '\\') AND ${excludeCueContainer()}`,
+      `SELECT * FROM tracks
+       WHERE (title LIKE ? ESCAPE '\\' OR artists LIKE ? ESCAPE '\\' OR album LIKE ? ESCAPE '\\' OR genres LIKE ? ESCAPE '\\')
+         AND ${excludeCueContainer()}`,
     )
-    .all(pattern, pattern, pattern) as TrackRow[];
+    .all(pattern, pattern, pattern, pattern) as TrackRow[];
   return rows.map(rowToTrack);
 };
 
@@ -293,6 +300,40 @@ export const getArtistList = (): ArtistSummary[] => {
     trackCount: row.trackCount,
     cover: row.cover ?? undefined,
   }));
+};
+
+/** 流派列表 */
+export const getGenreList = (): GenreSummary[] => {
+  const rows = getDb()
+    .prepare(
+      `SELECT
+         json_extract(g.value, '$') AS name,
+         COUNT(DISTINCT t.id) AS trackCount,
+         MAX(CASE WHEN t.cover IS NOT NULL THEN t.cover END) AS cover
+       FROM tracks t, json_each(t.genres) g
+       WHERE json_extract(g.value, '$') IS NOT NULL
+         AND TRIM(json_extract(g.value, '$')) != ''
+         AND ${excludeCueContainer("t.path")}
+       GROUP BY LOWER(name)`,
+    )
+    .all() as { name: string; trackCount: number; cover: string | null }[];
+  return rows.map((row) => ({
+    name: row.name,
+    trackCount: row.trackCount,
+    cover: row.cover ?? undefined,
+  }));
+};
+
+/** 按流派名获取全部曲目 */
+export const getGenreTracks = (genreName: string): Track[] => {
+  const rows = getDb()
+    .prepare(
+      `SELECT DISTINCT t.* FROM tracks t, json_each(t.genres) g
+       WHERE LOWER(json_extract(g.value, '$')) = LOWER(?)
+         AND ${excludeCueContainer("t.path")}`,
+    )
+    .all(genreName) as TrackRow[];
+  return rows.map(rowToTrack);
 };
 
 /** 按专辑名获取全部曲目 */

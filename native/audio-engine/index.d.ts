@@ -172,6 +172,8 @@ export interface JsMusicMetadata {
   album?: string
   /** 注释/副标题 */
   comment?: string
+  /** 流派原始标签文本（可能包含多个流派，由 JS 侧解析拆分） */
+  genre?: string
   /** 时长（秒） */
   duration: number
   /** 播放采样率（重采样后） */
@@ -252,6 +254,8 @@ export interface JsScannedTrack {
   album?: string
   /** 音轨编号 */
   track?: number
+  /** 流派原始标签文本（可能包含多个流派，由 JS 侧解析拆分） */
+  genre?: string
   /** 时长（秒） */
   duration: number
   codec: string

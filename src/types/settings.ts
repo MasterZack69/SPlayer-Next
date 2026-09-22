@@ -103,7 +103,15 @@ export const DEFAULT_SIDEBAR_NAV_GROUPS: SidebarNavGroup[] = [
   {
     name: "",
     showName: false,
-    keys: ["/", "/library", "/artists/local", "/albums/local", "/folders", "/stats"],
+    keys: [
+      "/",
+      "/library",
+      "/artists/local",
+      "/albums/local",
+      "/genres/local",
+      "/folders",
+      "/stats",
+    ],
   },
   {
     name: "",
