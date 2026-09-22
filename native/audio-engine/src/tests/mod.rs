@@ -3,3 +3,5 @@ mod decoder;
 mod fixtures;
 #[cfg(target_os = "linux")]
 mod pipewire;
+#[cfg(target_os = "windows")]
+mod wasapi;

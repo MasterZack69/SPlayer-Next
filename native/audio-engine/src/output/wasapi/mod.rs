@@ -14,8 +14,10 @@ use format::{build_wave_format, resolve_endpoint};
 use pcm::fill_buffer;
 
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+use std::sync::mpsc::{sync_channel, SyncSender};
 use std::sync::Arc;
 use std::thread::JoinHandle;
+use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
 use tracing::{debug, info, warn};
@@ -27,7 +29,9 @@ use windows::Win32::Media::Audio::{
     AUDCLNT_E_UNSUPPORTED_FORMAT, AUDCLNT_SHAREMODE_EXCLUSIVE, AUDCLNT_STREAMFLAGS_EVENTCALLBACK,
     WAVEFORMATEX, WAVEFORMATEXTENSIBLE, WAVEFORMATEXTENSIBLE_0,
 };
-use windows::Win32::System::Com::{CoCreateInstance, CLSCTX_ALL};
+use windows::Win32::System::Com::{
+    CoCreateInstance, CoInitializeEx, CoUninitialize, CLSCTX_ALL, COINIT_MULTITHREADED,
+};
 use windows::Win32::System::Threading::{CreateEventW, SetEvent, WaitForMultipleObjects, INFINITE};
 
 use crate::decoder::source::DecoderSource;
@@ -101,6 +105,15 @@ struct ComSend<T>(T);
 
 unsafe impl<T> Send for ComSend<T> {}
 
+/// 先释放渲染线程持有的 COM 接口，再退出 apartment。
+struct RenderApartment;
+
+impl Drop for RenderApartment {
+    fn drop(&mut self) {
+        unsafe { CoUninitialize() };
+    }
+}
+
 /// 渲染线程等待用句柄对守卫：中途出错时保证关闭
 struct EventHandles(EventHandle, EventHandle);
 
@@ -171,7 +184,7 @@ impl Drop for ExclusiveStream {
 pub fn open_exclusive_stream(
     device_id: Option<&str>,
     format: ExclusiveFormat,
-    mut source: DecoderSource,
+    source: DecoderSource,
     volume: Arc<AtomicU32>,
     stopped: Arc<AtomicBool>,
     paused: bool,
@@ -240,22 +253,11 @@ pub fn open_exclusive_stream(
             let buffer_frames = client.GetBufferSize()?;
 
             let paused_flag = Arc::new(AtomicBool::new(paused));
-            // 事件驱动模式下必须先填满缓冲再启动
-            prefill_buffer(
-                &render,
-                buffer_frames,
-                &mut source,
-                &volume,
-                &stopped,
-                &paused_flag,
-                &format,
-            )?;
-            client.Start().context("启动独占模式输出失败")?;
-
             let thread_client = ComSend(client.clone());
             let thread_render = ComSend(render);
             let thread_format = format;
             let thread_paused = Arc::clone(&paused_flag);
+            let (startup_tx, startup_rx) = sync_channel(1);
             let render_thread = std::thread::Builder::new()
                 .name("wasapi-exclusive".into())
                 .spawn(move || {
@@ -271,9 +273,22 @@ pub fn open_exclusive_stream(
                         stopped,
                         thread_paused,
                         on_failure,
+                        startup_tx,
                     );
                 })
                 .context("启动独占渲染线程失败")?;
+
+            // 等待渲染线程完成预填充和 Start，保留开流错误的同步回退语义。
+            if let Err(error) = startup_rx
+                .recv()
+                .context("独占渲染线程启动时退出")
+                .and_then(|result| result)
+            {
+                shutdown_handle.set();
+                let _ = render_thread.join();
+                let _ = client.Stop();
+                return Err(error);
+            }
 
             info!(
                 rate = format.sample_rate,
@@ -339,11 +354,43 @@ fn render_loop(
     stopped: Arc<AtomicBool>,
     paused: Arc<AtomicBool>,
     on_failure: Arc<dyn Fn() + Send + Sync + 'static>,
+    startup_tx: SyncSender<Result<()>>,
 ) {
+    if let Err(error) = unsafe { CoInitializeEx(None, COINIT_MULTITHREADED) }
+        .ok()
+        .context("初始化独占渲染线程 COM 失败")
+    {
+        let _ = startup_tx.send(Err(error));
+        return;
+    }
+    let _apartment = RenderApartment;
     let client = client.0;
     let render = render.0;
+    let _priority = crate::priority::RenderThreadPriority::new();
+    // 输出必须在供数线程取得调度优先级后启动，避免创建线程期间耗尽首个缓冲。
+    let startup = prefill_buffer(
+        &render,
+        buffer_frames,
+        &mut source,
+        &volume,
+        &stopped,
+        &paused,
+        &format,
+    )
+    .and_then(|()| unsafe { client.Start().context("启动独占模式输出失败") });
+    let started = startup.is_ok();
+    if startup_tx.send(startup).is_err() || !started {
+        unsafe {
+            let _ = client.Stop();
+        }
+        return;
+    }
     let wait_handles = [period_event.0, shutdown_event.0];
     let block_align = usize::from(format.channels * format.container_bits / 8);
+    let period = Duration::from_secs_f64(f64::from(buffer_frames) / f64::from(format.sample_rate));
+    let mut last_wake = Instant::now();
+    let mut late_wakes = 0u64;
+    let mut longest_gap = Duration::ZERO;
 
     loop {
         let wait = unsafe { WaitForMultipleObjects(&wait_handles, false, INFINITE) };
@@ -354,6 +401,16 @@ fn render_loop(
             warn!(code = wait.0, "独占模式等待周期事件失败");
             on_failure();
             break;
+        }
+
+        let now = Instant::now();
+        let gap = now.duration_since(last_wake);
+        last_wake = now;
+        if !paused.load(Ordering::Acquire) && !stopped.load(Ordering::Acquire) {
+            longest_gap = longest_gap.max(gap);
+            if gap > period * 2 {
+                late_wakes += 1;
+            }
         }
 
         // 独占事件驱动模式
@@ -383,7 +440,15 @@ fn render_loop(
     unsafe {
         let _ = client.Stop();
     }
-    debug!("独占模式渲染线程退出");
+    if late_wakes > 0 {
+        warn!(
+            late_wakes,
+            longest_gap_ms = longest_gap.as_secs_f64() * 1000.0,
+            period_ms = period.as_secs_f64() * 1000.0,
+            "独占输出唤醒间隔超过两个设备周期"
+        );
+    }
+    debug!(late_wakes, "独占模式渲染线程退出");
 }
 
 /// 读取实际开流失败的 HRESULT，保留稳定的回退提示分类。
