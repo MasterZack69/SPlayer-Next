@@ -1,7 +1,9 @@
 use std::collections::VecDeque;
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use std::sync::Arc;
+use std::time::Duration;
 
+use crossbeam_queue::ArrayQueue;
 use ffmpeg_audio::HttpCancelHandle;
 use parking_lot::{Condvar, Mutex};
 
@@ -26,10 +28,13 @@ pub enum PopResult {
 pub struct Shared {
     decoded_buffer: Mutex<VecDeque<AudioChunk>>,
     decoded_condvar: Condvar,
-    output_buffer: Mutex<VecDeque<AudioChunk>>,
+    output_buffer: ArrayQueue<AudioChunk>,
+    output_wait: Mutex<()>,
+    output_samples: AtomicU64,
+    underruns: AtomicU64,
     output_condvar: Condvar,
-    player_buffer_pool: Mutex<Vec<Vec<f32>>>,
-    fft_buffer_pool: Mutex<Vec<Vec<f32>>>,
+    player_buffer_pool: ArrayQueue<Vec<f32>>,
+    fft_buffer_pool: ArrayQueue<Vec<f32>>,
     decode_eof: AtomicBool,
     output_eof: AtomicBool,
     is_stopping: AtomicBool,
@@ -57,8 +62,9 @@ pub struct Shared {
 /// 共享缓冲区最大容量（背压阈值）
 pub const FRAME_BUFFER_CAPACITY: usize = 192;
 
-/// DSP 后缓冲只保留少量块，保证 EQ/tempo 参数更新能快速生效
-const OUTPUT_BUFFER_CAPACITY: usize = 4;
+/// 块数只限制元数据；正常背压按时长计算，避免高采样率缩短缓冲。
+const OUTPUT_BUFFER_CAPACITY: usize = 256;
+const OUTPUT_BUFFER_MS: u64 = 100;
 
 /// 复用池上限覆盖解码队列、输出队列和两个线程的在手缓冲
 const BUFFER_POOL_CAPACITY: usize = FRAME_BUFFER_CAPACITY + OUTPUT_BUFFER_CAPACITY + 4;
@@ -72,10 +78,13 @@ impl Shared {
         Arc::new(Self {
             decoded_buffer: Mutex::new(VecDeque::with_capacity(FRAME_BUFFER_CAPACITY)),
             decoded_condvar: Condvar::new(),
-            output_buffer: Mutex::new(VecDeque::with_capacity(OUTPUT_BUFFER_CAPACITY)),
+            output_buffer: ArrayQueue::new(OUTPUT_BUFFER_CAPACITY),
+            output_wait: Mutex::new(()),
+            output_samples: AtomicU64::new(0),
+            underruns: AtomicU64::new(0),
             output_condvar: Condvar::new(),
-            player_buffer_pool: Mutex::new(Vec::with_capacity(BUFFER_POOL_CAPACITY)),
-            fft_buffer_pool: Mutex::new(Vec::with_capacity(BUFFER_POOL_CAPACITY)),
+            player_buffer_pool: ArrayQueue::new(BUFFER_POOL_CAPACITY),
+            fft_buffer_pool: ArrayQueue::new(BUFFER_POOL_CAPACITY),
             decode_eof: AtomicBool::new(false),
             output_eof: AtomicBool::new(false),
             is_stopping: AtomicBool::new(false),
@@ -128,30 +137,24 @@ impl Shared {
 
     /// 获取可复用的播放样本缓冲
     pub fn take_player_buffer(&self) -> Vec<f32> {
-        self.player_buffer_pool.lock().pop().unwrap_or_default()
+        self.player_buffer_pool.pop().unwrap_or_default()
     }
 
     /// 归还播放样本缓冲；池满时直接释放以保持内存有界
     pub fn recycle_player_buffer(&self, mut buffer: Vec<f32>) {
         buffer.clear();
-        let mut pool = self.player_buffer_pool.lock();
-        if pool.len() < BUFFER_POOL_CAPACITY {
-            pool.push(buffer);
-        }
+        let _ = self.player_buffer_pool.push(buffer);
     }
 
     /// 获取可复用的 FFT 样本缓冲
     pub fn take_fft_buffer(&self) -> Vec<f32> {
-        self.fft_buffer_pool.lock().pop().unwrap_or_default()
+        self.fft_buffer_pool.pop().unwrap_or_default()
     }
 
     /// 归还 FFT 样本缓冲；池满时直接释放以保持内存有界
     pub fn recycle_fft_buffer(&self, mut buffer: Vec<f32>) {
         buffer.clear();
-        let mut pool = self.fft_buffer_pool.lock();
-        if pool.len() < BUFFER_POOL_CAPACITY {
-            pool.push(buffer);
-        }
+        let _ = self.fft_buffer_pool.push(buffer);
     }
 
     /// 批量累加已消费的采样数（由 DecoderSource 按 chunk 调用）
@@ -166,7 +169,7 @@ impl Shared {
 
     /// 缓冲区是否为空（true 表示解码 underrun，sink 不消费可能是正常等待数据）
     pub fn is_buffer_empty(&self) -> bool {
-        self.output_buffer.lock().is_empty()
+        self.output_buffer.is_empty()
     }
 
     /// 标记所有数据已被消费完毕（DecoderSource 迭代结束时调用）
@@ -250,27 +253,61 @@ impl Shared {
         chunk
     }
 
-    /// 推入 DSP 后的数据块，保持小容量背压
+    /// 按输出时长背压，最多超出一个解码块。
     pub fn push_output(&self, chunk: AudioChunk) {
-        let mut buffer = self.output_buffer.lock();
-        while buffer.len() >= OUTPUT_BUFFER_CAPACITY && !self.is_stopping.load(Ordering::Acquire) {
-            self.output_condvar.wait(&mut buffer);
+        let limit =
+            u64::from(self.sample_rate) * u64::from(self.channels) * OUTPUT_BUFFER_MS / 1000;
+        let samples = chunk.player_samples.len() as u64;
+        let mut pending = chunk;
+        let mut wait = self.output_wait.lock();
+        loop {
+            if self.is_stopping.load(Ordering::Acquire) {
+                return;
+            }
+            if self.output_samples.load(Ordering::Acquire) < limit {
+                // 先计数再发布，避免消费者先弹出导致计数下溢。
+                self.output_samples.fetch_add(samples, Ordering::AcqRel);
+                match self.output_buffer.push(pending) {
+                    Ok(()) => return,
+                    Err(chunk) => pending = chunk,
+                }
+                self.output_samples.fetch_sub(samples, Ordering::AcqRel);
+            }
+            // 回调不持有等待锁，超时兜住检查条件与等待之间的通知竞态。
+            self.output_condvar
+                .wait_for(&mut wait, Duration::from_millis(2));
         }
-        if self.is_stopping.load(Ordering::Acquire) {
-            return;
-        }
-        buffer.push_back(chunk);
-        self.output_condvar.notify_one();
+    }
+
+    /// 回调只累加计数，由低频状态线程记录欠载。
+    pub fn record_underrun(&self) {
+        self.underruns.fetch_add(1, Ordering::Relaxed);
+    }
+
+    pub fn take_underruns(&self) -> u64 {
+        self.underruns.swap(0, Ordering::Relaxed)
+    }
+
+    /// 短曲和极小解码块不能因预缓冲阈值而无法开始消费。
+    pub fn output_ready(&self) -> bool {
+        self.output_samples.load(Ordering::Acquire)
+            >= u64::from(self.sample_rate) * u64::from(self.channels) * 20 / 1000
+            || self.output_eof.load(Ordering::Acquire)
+            || self.output_buffer.is_full()
     }
 
     /// 非阻塞弹出数据块，供实时输出线程避免在音频回调链路里等待解码线程
     pub fn try_pop(&self) -> PopResult {
-        let mut buffer = self.output_buffer.lock();
-        if let Some(chunk) = buffer.pop_front() {
+        // 必须先观察 EOF，再检查队列；反过来会漏掉刚发布的最后一块。
+        let finished =
+            self.output_eof.load(Ordering::Acquire) || self.is_stopping.load(Ordering::Acquire);
+        if let Some(chunk) = self.output_buffer.pop() {
+            self.output_samples
+                .fetch_sub(chunk.player_samples.len() as u64, Ordering::AcqRel);
             self.output_condvar.notify_one();
             return PopResult::Chunk(chunk);
         }
-        if self.output_eof.load(Ordering::Acquire) || self.is_stopping.load(Ordering::Acquire) {
+        if finished {
             PopResult::Finished
         } else {
             PopResult::Pending
@@ -303,15 +340,17 @@ impl Shared {
 
     /// 清空缓冲区并释放内存（stop 后调用，避免 AudioChunk 在 Arc 引用存活期间持续占用内存）
     pub fn drain_buffer(&self) {
+        // 控制线程等待生产者退出发布区，避免停止后仍留下最后一块。
+        let _output_guard = self.output_wait.lock();
         let mut decoded = self.decoded_buffer.lock();
         let decoded_chunks = std::mem::take(&mut *decoded);
         decoded.shrink_to_fit();
         drop(decoded);
-        let mut output = self.output_buffer.lock();
-        let output_chunks = std::mem::take(&mut *output);
-        output.shrink_to_fit();
-        drop(output);
-        for chunk in decoded_chunks.into_iter().chain(output_chunks) {
+        for chunk in decoded_chunks {
+            self.recycle_player_buffer(chunk.player_samples);
+            self.recycle_fft_buffer(chunk.fft_samples);
+        }
+        while let PopResult::Chunk(chunk) = self.try_pop() {
             self.recycle_player_buffer(chunk.player_samples);
             self.recycle_fft_buffer(chunk.fft_samples);
         }
@@ -331,7 +370,73 @@ mod tests {
             shared.recycle_fft_buffer(Vec::with_capacity(16));
         }
 
-        assert_eq!(shared.player_buffer_pool.lock().len(), BUFFER_POOL_CAPACITY);
-        assert_eq!(shared.fft_buffer_pool.lock().len(), BUFFER_POOL_CAPACITY);
+        assert_eq!(shared.player_buffer_pool.len(), BUFFER_POOL_CAPACITY);
+        assert_eq!(shared.fft_buffer_pool.len(), BUFFER_POOL_CAPACITY);
+    }
+    #[test]
+    fn high_rate_buffer_is_limited_by_duration_and_stop_unblocks_producer() {
+        for rate in [44_100, 48_000, 96_000, 192_000, 352_800] {
+            let shared = Shared::new(rate, 2);
+            let samples = rate as usize * 2 / 100;
+            for _ in 0..10 {
+                shared.push_output(AudioChunk {
+                    player_samples: vec![0.25; samples],
+                    fft_samples: vec![],
+                    source_sample_count: samples as u64,
+                });
+            }
+            assert_eq!(
+                shared.output_samples.load(Ordering::Acquire),
+                (samples * 10) as u64
+            );
+            assert!(shared.output_ready());
+            let producer = Arc::clone(&shared);
+            let (tx, rx) = std::sync::mpsc::channel();
+            let worker = std::thread::spawn(move || {
+                producer.push_output(AudioChunk {
+                    player_samples: vec![0.5; samples],
+                    fft_samples: vec![],
+                    source_sample_count: samples as u64,
+                });
+                tx.send(()).unwrap();
+            });
+            assert!(rx.recv_timeout(Duration::from_millis(10)).is_err());
+            shared.stop();
+            rx.recv_timeout(Duration::from_secs(1)).unwrap();
+            worker.join().unwrap();
+            shared.drain_buffer();
+            assert!(shared.is_buffer_empty());
+            assert_eq!(shared.output_samples.load(Ordering::Acquire), 0);
+        }
+    }
+
+    #[test]
+    fn concurrent_consumer_keeps_every_sample_in_order_through_eof() {
+        let shared = Shared::new(192_000, 2);
+        let producer = Arc::clone(&shared);
+        let worker = std::thread::spawn(move || {
+            for i in 0..10_000 {
+                producer.push_output(AudioChunk {
+                    player_samples: vec![i as f32; 32],
+                    fft_samples: vec![],
+                    source_sample_count: 32,
+                });
+            }
+            producer.mark_output_eof();
+        });
+        let mut chunks = 0;
+        loop {
+            match shared.try_pop() {
+                PopResult::Chunk(chunk) => {
+                    assert!(chunk.player_samples.iter().all(|s| *s == chunks as f32));
+                    chunks += 1;
+                }
+                PopResult::Pending => std::thread::yield_now(),
+                PopResult::Finished => break,
+            }
+        }
+        worker.join().unwrap();
+        assert_eq!(chunks, 10_000);
+        assert_eq!(shared.output_samples.load(Ordering::Acquire), 0);
     }
 }

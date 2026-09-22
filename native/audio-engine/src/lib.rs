@@ -19,6 +19,9 @@ mod shared;
 mod source;
 mod tempo;
 
+#[cfg(test)]
+mod output_tests;
+
 #[cfg(target_os = "windows")]
 mod wasapi_exclusive;
 

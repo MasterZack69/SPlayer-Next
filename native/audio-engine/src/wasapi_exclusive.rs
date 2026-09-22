@@ -563,6 +563,7 @@ fn fill_buffer(
     format: &ExclusiveFormat,
 ) {
     let bytes_per_sample = usize::from(format.container_bits / 8);
+    source.begin_callback();
     let mut raw = [0u8; 4];
     for chunk in buffer.chunks_exact_mut(bytes_per_sample) {
         let value = if silent {

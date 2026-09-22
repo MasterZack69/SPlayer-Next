@@ -2,10 +2,9 @@ use std::sync::Arc;
 
 use crate::fft::FftAnalyzer;
 use crate::shared::{PopResult, Shared};
-const UNDERRUN_SILENCE_MS: u32 = 20;
 
 /// 平台无关的解码样本读取器。
-/// DSP 已在后台线程完成；这里不获取 DSP 锁、不扩容，欠载时返回短静音垫片。
+/// DSP 已在后台线程完成；这里不获取 DSP 锁、不扩容，欠载时只补齐当前回调。
 /// 所有平台的 CPAL 输出回调都从该读取器拉取样本。
 pub struct DecoderSampleReader {
     shared: Arc<Shared>,
@@ -13,25 +12,27 @@ pub struct DecoderSampleReader {
     /// DSP 后样本缓冲，直接接管 chunk 的 Vec，不复制也不扩容
     local_buffer: Vec<f32>,
     local_index: usize,
-    /// 解码暂时跟不上时输出的短静音垫片，避免阻塞实时输出链路
-    underrun_silence_remaining: usize,
-    sample_rate: u32,
-    channels: u16,
+    /// 欠载只补齐当前设备回调，下一次回调立即重新检查数据。
+    underrun: bool,
+    started: bool,
 }
 
 impl DecoderSampleReader {
     pub fn new(shared: Arc<Shared>, fft: Arc<FftAnalyzer>) -> Self {
-        let sample_rate = shared.sample_rate();
-        let channels = shared.channels();
         Self {
             shared,
             fft,
             local_buffer: Vec::new(),
             local_index: 0,
-            underrun_silence_remaining: 0,
-            sample_rate,
-            channels,
+            underrun: false,
+            started: false,
         }
+    }
+
+    /// 每次设备请求新缓冲时解除欠载，避免静音跨越多个回调。
+    pub fn begin_callback(&mut self) {
+        self.started = self.started || self.shared.output_ready();
+        self.underrun = !self.started;
     }
 }
 
@@ -48,8 +49,7 @@ impl Iterator for DecoderSampleReader {
                 .recycle_player_buffer(std::mem::take(&mut self.local_buffer));
             self.local_index = 0;
         }
-        if self.underrun_silence_remaining > 0 {
-            self.underrun_silence_remaining -= 1;
+        if self.underrun {
             return Some(0.0);
         }
 
@@ -73,11 +73,8 @@ impl Iterator for DecoderSampleReader {
                     self.shared.recycle_player_buffer(chunk.player_samples);
                 }
                 PopResult::Pending => {
-                    let silence_samples = (u64::from(self.sample_rate)
-                        * u64::from(self.channels)
-                        * u64::from(UNDERRUN_SILENCE_MS)
-                        / 1000) as usize;
-                    self.underrun_silence_remaining = silence_samples.saturating_sub(1);
+                    self.underrun = true;
+                    self.shared.record_underrun();
                     return Some(0.0);
                 }
                 PopResult::Finished => {
@@ -151,7 +148,7 @@ mod tests {
     }
 
     #[test]
-    fn returns_short_silence_when_decoder_temporarily_underruns() {
+    fn underrun_recovers_at_next_callback_without_extending_silence() {
         let shared = Shared::new(1000, 2);
         let mut source = DecoderSource::new(Arc::clone(&shared), Arc::new(FftAnalyzer::new()));
 
@@ -164,7 +161,52 @@ mod tests {
         for _ in 0..39 {
             assert_eq!(source.next(), Some(0.0));
         }
+        shared.mark_output_eof();
+        source.begin_callback();
         assert_eq!(source.next(), Some(0.25));
         assert_eq!(source.next(), Some(-0.25));
+    }
+
+    #[test]
+    fn startup_waits_for_audio_but_short_track_drains_at_eof() {
+        let shared = Shared::new(192_000, 2);
+        let mut source = DecoderSource::new(Arc::clone(&shared), Arc::new(FftAnalyzer::new()));
+        shared.push_output(AudioChunk {
+            player_samples: vec![0.25; 2],
+            fft_samples: vec![],
+            source_sample_count: 2,
+        });
+        source.begin_callback();
+        assert_eq!(source.next(), Some(0.0));
+        assert_eq!(shared.samples_consumed_count(), 0);
+        shared.mark_output_eof();
+        source.begin_callback();
+        assert_eq!(source.next(), Some(0.25));
+        assert_eq!(source.next(), Some(0.25));
+        assert_eq!(source.next(), None);
+        assert!(shared.is_all_consumed());
+        assert_eq!(shared.take_underruns(), 0);
+    }
+
+    #[test]
+    fn high_rate_underrun_does_not_delay_ready_audio_to_twenty_milliseconds() {
+        for rate in [44_100, 48_000, 96_000, 192_000, 352_800] {
+            let shared = Shared::new(rate, 2);
+            let mut source = DecoderSource::new(Arc::clone(&shared), Arc::new(FftAnalyzer::new()));
+            source.started = true;
+            source.begin_callback();
+            for _ in 0..128 {
+                assert_eq!(source.next(), Some(0.0));
+            }
+            assert_eq!(shared.take_underruns(), 1);
+            shared.push_output(AudioChunk {
+                player_samples: vec![0.25, -0.25],
+                fft_samples: vec![],
+                source_sample_count: 2,
+            });
+            source.begin_callback();
+            assert_eq!(source.next(), Some(0.25));
+            assert_eq!(source.next(), Some(-0.25));
+        }
     }
 }

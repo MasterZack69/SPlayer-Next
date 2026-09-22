@@ -76,7 +76,10 @@ impl FftAnalyzer {
 
     /// 直接从交织立体声样本推入（由播放线程调用），一次遍历无需中间分配
     pub fn push_interleaved_samples(&self, interleaved: &[f32]) {
-        let mut buffer = self.sample_buffer.lock();
+        // 频谱允许丢弃一次更新，音频回调不能等待分析线程。
+        let Some(mut buffer) = self.sample_buffer.try_lock() else {
+            return;
+        };
         for pair in interleaved.chunks_exact(2) {
             let write_pos = buffer.write_pos;
             buffer.left[write_pos] = pair[0];
@@ -254,5 +257,20 @@ mod tests {
             "peak={peak}, expected={expected}"
         );
         assert_eq!(left, right);
+    }
+    #[test]
+    fn audio_callback_does_not_wait_for_spectrum_analysis() {
+        let analyzer = Arc::new(FftAnalyzer::new());
+        let guard = analyzer.sample_buffer.lock();
+        let writer = Arc::clone(&analyzer);
+        let (tx, rx) = std::sync::mpsc::channel();
+        let thread = std::thread::spawn(move || {
+            writer.push_interleaved_samples(&[0.25, -0.25]);
+            tx.send(()).unwrap();
+        });
+        let completed = rx.recv_timeout(std::time::Duration::from_secs(1));
+        drop(guard);
+        thread.join().unwrap();
+        assert!(completed.is_ok());
     }
 }

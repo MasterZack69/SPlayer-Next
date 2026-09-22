@@ -2,7 +2,7 @@
 //!
 //! cpal 0.18 起各后端的 `Stream` 均为 `Send`，可直接由 `PlaybackHandle` 持有，
 //! 无需再为 `!Send` 做专用线程隔离。`AudioOutput` 只负责解析输出设备与配置：
-//! 设备采样率即播放重采样目标，每次加载/seek 音源时按该配置创建独立输出流。
+//! 流采样率是播放重采样目标，不等同于音频服务器图或硬件采样率。
 
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::Arc;
@@ -70,13 +70,11 @@ impl AudioOutput {
         on_failure: OutputFailureCallback,
         exclusive: Option<&ExclusiveFallbackCallback>,
     ) -> Result<Self> {
-        let (device, config, exclusive_format) =
+        let (device, config, _exclusive_format) =
             open_device(device_id, requested_sample_rate, source_bits, exclusive)
                 .with_audio_kind(AudioErrorKind::Device)?;
-        #[cfg(not(target_os = "windows"))]
-        let _ = exclusive_format;
         #[cfg(target_os = "windows")]
-        if let Some(format) = exclusive_format {
+        if let Some(format) = _exclusive_format {
             info!(
                 id = device_id_string(&device).as_deref().unwrap_or("-"),
                 name = %device,
@@ -87,7 +85,7 @@ impl AudioOutput {
             );
         }
         #[cfg(target_os = "windows")]
-        if exclusive_format.is_none() {
+        if _exclusive_format.is_none() {
             info!(
                 id = device_id_string(&device).as_deref().unwrap_or("-"),
                 name = %device,
@@ -106,7 +104,7 @@ impl AudioOutput {
             device,
             config,
             #[cfg(target_os = "windows")]
-            exclusive: exclusive_format,
+            exclusive: _exclusive_format,
             generation,
             on_failure,
             #[cfg(target_os = "windows")]
@@ -362,6 +360,7 @@ fn open_device_internal(
     exclusive: Option<&ExclusiveFallbackCallback>,
 ) -> Result<(cpal::Device, SupportedStreamConfig, ExclusiveFormatOpt)> {
     let host = cpal::default_host();
+    info!(backend = ?host.id(), requested_sample_rate, "协商音频输出流格式");
     let device = match device_id {
         Some(selector) => {
             find_device(&host, selector).with_context(|| format!("输出设备 '{selector}' 不存在"))?
@@ -503,11 +502,13 @@ fn build_typed_stream_for_format(
 
 #[cfg(any(target_os = "linux", test))]
 fn format_pipewire_props(sample_rate: u32) -> String {
+    // 以时间比例建议周期，避免同样的帧数在高采样率下变成过短的截止时间。
     let mut props = serde_json::json!({
         "application.id": "top.imsyy.splayer_next",
         "application.name": "SPlayer-Next",
         "application.icon-name": "top.imsyy.splayer_next",
         "media.name": "Playback",
+        "node.latency": "1024/48000",
     });
     if sample_rate > 0 {
         props["node.rate"] = format!("1/{sample_rate}").into();
@@ -533,9 +534,14 @@ mod pipewire_props {
         pub(super) fn set_stream_props(sample_rate: u32) -> Self {
             let lock = ENV_LOCK.lock().unwrap_or_else(|err| err.into_inner());
             let original = std::env::var_os("PIPEWIRE_PROPS");
+            // 用户可能使用 SPA JSON（而非标准 JSON），原样保留其显式配置。
+            if original.is_some() {
+                return Self {
+                    original,
+                    _lock: lock,
+                };
+            }
 
-            // Linux PipeWire 下 cpal 构造流未携带 node.rate 属性与稳定应用元数据。
-            // 注入 node.rate 驱动硬件 DAC 切换时钟频率，注入 application.id 与固定 media.name 使 WirePlumber 能稳定记忆音量。
             unsafe {
                 std::env::set_var("PIPEWIRE_PROPS", super::format_pipewire_props(sample_rate));
             }
@@ -570,6 +576,7 @@ fn build_typed_stream<T>(
 where
     T: SizedSample + Sample + FromSample<f32>,
 {
+    let mut xruns = 0_u64;
     let stream = {
         #[cfg(target_os = "linux")]
         let _props_guard = pipewire_props::Guard::set_stream_props(config.sample_rate);
@@ -577,6 +584,7 @@ where
         device.build_output_stream(
             config,
             move |data: &mut [T], _| {
+                source.begin_callback();
                 let gain = f32::from_bits(volume.load(Ordering::Relaxed));
                 if stopped.load(Ordering::Acquire) {
                     data.fill(T::EQUILIBRIUM);
@@ -587,6 +595,18 @@ where
                 }
             },
             move |error| {
+                if !output_error_requires_rebuild(error.kind()) {
+                    if error.kind() == cpal::ErrorKind::Xrun {
+                        xruns += 1;
+                        if xruns.is_power_of_two() {
+                            warn!(xruns, "音频后端欠载，保持当前输出流");
+                        }
+                    }
+                    if error.kind() == cpal::ErrorKind::RealtimeDenied {
+                        warn!(%error, "音频实时调度不可用，保持当前输出流");
+                    }
+                    return;
+                }
                 let err_msg = error.to_string();
                 // 设备失效的两种上报文本：默认设备监听的 "no longer valid"，以及绑定端点被拔出时
                 // GetCurrentPadding 返回 0x88890004 (AUDCLNT_E_DEVICE_INVALIDATED) 的十进制 OS Error。
@@ -604,6 +624,14 @@ where
         )?
     };
     Ok(stream)
+}
+
+/// CPAL 的欠载、调度权限和自动路由通知不表示输出流失效。
+fn output_error_requires_rebuild(kind: cpal::ErrorKind) -> bool {
+    !matches!(
+        kind,
+        cpal::ErrorKind::Xrun | cpal::ErrorKind::RealtimeDenied | cpal::ErrorKind::DeviceChanged
+    )
 }
 
 #[cfg(test)]
@@ -645,6 +673,7 @@ mod tests {
     #[test]
     fn pipewire_props_includes_stable_identity_and_optional_rate() {
         let props_with_rate = format_pipewire_props(96000);
+        assert!(props_with_rate.contains(r#""node.latency":"1024/48000""#));
         assert!(props_with_rate.contains(r#""node.rate":"1/96000""#));
         assert!(props_with_rate.contains(r#""application.id":"top.imsyy.splayer_next""#));
         assert!(props_with_rate.contains(r#""application.name":"SPlayer-Next""#));
@@ -657,5 +686,23 @@ mod tests {
         assert!(props_without_rate.contains(r#""application.name":"SPlayer-Next""#));
         assert!(props_without_rate.contains(r#""application.icon-name":"top.imsyy.splayer_next""#));
         assert!(props_without_rate.contains(r#""media.name":"Playback""#));
+    }
+
+    #[test]
+    fn recoverable_notifications_do_not_reopen_output() {
+        for kind in [
+            cpal::ErrorKind::Xrun,
+            cpal::ErrorKind::RealtimeDenied,
+            cpal::ErrorKind::DeviceChanged,
+        ] {
+            assert!(!output_error_requires_rebuild(kind));
+        }
+        for kind in [
+            cpal::ErrorKind::DeviceNotAvailable,
+            cpal::ErrorKind::StreamInvalidated,
+            cpal::ErrorKind::HostUnavailable,
+        ] {
+            assert!(output_error_requires_rebuild(kind));
+        }
     }
 }
