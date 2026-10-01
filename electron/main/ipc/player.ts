@@ -1,4 +1,10 @@
-import { prepareNextTrack, cancelPreparedTrack } from "@main/services/playerPreload";
+import {
+  prepareNextTrack,
+  cancelPreparedTrack,
+  takeTransitionReady,
+  setCurrentTransitionRange,
+  getTransitionEndMs,
+} from "@main/services/playerPreload";
 import { extname } from "node:path";
 import { app, ipcMain, powerMonitor } from "electron";
 import { sendToMain } from "@main/utils/broadcast";
@@ -11,7 +17,7 @@ import * as nowPlaying from "@main/services/nowPlaying";
 import * as lastfm from "@main/services/lastfm";
 import * as neteaseScrobble from "@main/services/neteaseScrobble";
 import { fetchBytes } from "@main/utils/fetchBytes";
-import { getPlayer, resetPlayer, onPlayerCreated } from "@main/services/engine";
+import { getPlayer, resetPlayer, onPlayerCreated, onPlayerReset } from "@main/services/engine";
 import {
   cancelPendingReinit,
   setPauseOnDeviceSwitch,
@@ -47,9 +53,11 @@ import type {
   RepeatMode,
   ShuffleMode,
   PlayerState,
+  TransitionPreference,
 } from "@shared/types/player";
 import type { MediaEvent } from "@main/services/media";
 import { JsPlayerEvent } from "@splayer/audio-engine";
+import type { JsMusicMetadata } from "@splayer/audio-engine";
 
 type AudioEngineModule = typeof import("@splayer/audio-engine");
 
@@ -180,6 +188,20 @@ const registerNativeEvents = (inst: InstanceType<AudioEngineModule["AudioPlayer"
       case "position": {
         const posMs = toDisplayPositionMs(toMs(event.position ?? 0));
         const durMs = toDisplayDurationMs(toMs(event.duration ?? 0));
+        const endPosition = toDisplayPositionMs(
+          getTransitionEndMs(
+            activeCueRange ? activeCueRange.startMs + durMs : durMs,
+            toMs(event.position ?? 0),
+            inst.getSpeed(),
+          ),
+        );
+        const readyId = takeTransitionReady(endPosition - posMs, inst.getSpeed());
+        if (readyId) {
+          sendToMain("player:event", {
+            type: "transitionReady",
+            data: { id: readyId, position: posMs, endPosition },
+          });
+        }
         const positionEvent = {
           type: "position",
           data: { position: posMs, duration: durMs },
@@ -192,6 +214,21 @@ const registerNativeEvents = (inst: InstanceType<AudioEngineModule["AudioPlayer"
         lastfm.onPosition();
         neteaseScrobble.onPosition(posMs);
         if (store.get("system.taskbarProgress") && durMs > 0) setTaskbarProgress(posMs / durMs);
+        break;
+      }
+      case "transitionChanged": {
+        if (event.transitionActive) {
+          playerLog.info("曲尾交接点识别", {
+            reason: event.transitionReason === "quiet" ? "持续低能量" : "最迟交接边界",
+            plannedFadeSeconds: event.transitionFadeSeconds,
+          });
+        }
+        const transitionEvent = {
+          type: "transition",
+          data: { active: event.transitionActive ?? false, mode: "crossfade" },
+        } as const;
+        sendToMain("player:event", transitionEvent);
+        wsBroadcast(transitionEvent);
         break;
       }
       case "fftData": {
@@ -223,15 +260,194 @@ const registerNativeEvents = (inst: InstanceType<AudioEngineModule["AudioPlayer"
   });
 };
 
-/** 每次 player:load 自增 */
+/** 播放操作代次，加载、停止、跳转和实例重置都会作废旧响应。 */
 let loadSeq = 0;
+onPlayerReset(() => {
+  loadSeq++;
+});
+
+/**
+ * 在原生加载或交叉交接完成后统一更新媒体信息与播放统计
+ * @param source - 当前曲目的实际音源
+ * @param options - 当前曲目的权威元数据和播放上下文
+ * @param meta - 原生解码器返回的音频信息
+ * @param seq - 用于忽略迟到的高清封面请求
+ * @returns 渲染进程使用的曲目信息
+ */
+const completeTrackLoad = (
+  source: string,
+  options: LoadOptions,
+  meta: JsMusicMetadata,
+  seq: number,
+) => {
+  const authoritative = options.meta ?? null;
+  const autoPlay = options.autoPlay ?? true;
+  const isRemote = authoritative != null && authoritative.source !== "local";
+  const remoteCover = isRemote ? (authoritative.coverOriginal ?? authoritative.cover) : undefined;
+  const coverFetchUrl =
+    remoteCover && /^(https?|streaming-cover):\/\//i.test(remoteCover) ? remoteCover : undefined;
+  const coverUrl = coverFetchUrl && /^https?:\/\//i.test(coverFetchUrl) ? coverFetchUrl : undefined;
+  const durationMs = toDisplayDurationMs(toMs(meta.duration));
+  const startMs = activeCueRange?.startMs ?? 0;
+  setCurrentTransitionRange(startMs, startMs + durationMs);
+  const displayTitle =
+    authoritative?.title ?? (meta.title || source.split(/[/\\]/).pop() || source);
+  const displayArtists = authoritative
+    ? (authoritative.artists ?? [])
+    : parseArtists(meta.artist ?? "");
+  const displayAlbum = authoritative?.album?.name ?? parseAlbum(meta.album ?? "")?.name ?? "";
+  const localCover = isRemote ? null : (getPlayer().getCoverRaw() ?? null);
+  const artistText = formatArtists(displayArtists);
+  const header = artistText ? `${displayTitle} - ${artistText}` : displayTitle || appName;
+  mediaService.setMetadata({
+    title: displayTitle,
+    artists: artistNames(displayArtists),
+    album: displayAlbum,
+    coverData: localCover ?? undefined,
+    coverUrl,
+    durationMs,
+  });
+  mediaService.setPlayState({ status: autoPlay ? "Playing" : "Paused" });
+  getMainWindow()?.setTitle(header);
+  setTraySongName(header);
+  setTrayPlayState(autoPlay ? "playing" : "paused");
+  if (!isRemote) setTaskbarThumbnailCover(meta.cover);
+  lastfm.onTrackLoaded({
+    title: displayTitle,
+    artist: displayArtists[0]?.name ?? "",
+    album: displayAlbum,
+    durationMs,
+    autoPlay,
+  });
+  neteaseScrobble.onTrackLoaded(authoritative, options.context, durationMs, autoPlay);
+  if (coverFetchUrl) {
+    void fetchBytes(coverFetchUrl).then((buf) => {
+      if (!buf || seq !== loadSeq) return;
+      mediaService.setMetadata({
+        title: displayTitle,
+        artists: artistNames(displayArtists),
+        album: displayAlbum,
+        coverData: buf,
+        coverUrl,
+        durationMs,
+      });
+      setTaskbarThumbnailCover(buf);
+    });
+  }
+  const quality = {
+    sampleRate: meta.originalSampleRate,
+    channels: meta.channels,
+    bitsPerSample: meta.bitsPerSample,
+    bitRate: meta.bitRate,
+    codec: meta.codec,
+  };
+  return {
+    success: true as const,
+    data: {
+      detail: {
+        quality,
+        embeddedLyric: meta.embeddedLyric,
+        externalLyrics: meta.externalLyrics,
+      },
+      mediaInfo: {
+        title: meta.title || displayTitle,
+        artists: authoritative?.artists?.length
+          ? authoritative.artists
+          : parseArtists(meta.artist ?? ""),
+        album: authoritative?.album ?? parseAlbum(meta.album ?? ""),
+        genres: authoritative?.genres?.length ? authoritative.genres : parseGenres(meta.genre),
+        duration: durationMs,
+        cover: isRemote ? undefined : toCacheUrl(meta.cover),
+        quality,
+      },
+    },
+  };
+};
 
 /** 播放器相关 IPC */
 export const registerPlayerIpc = (): void => {
-  ipcMain.handle("player:prepareNext", (_event, id: string, source: string, startMs?: number) =>
-    prepareNextTrack(id, source, startMs),
+  ipcMain.handle(
+    "player:prepareNext",
+    (_event, id: string, source: string, startMs?: number, preference?: TransitionPreference) =>
+      prepareNextTrack(id, source, startMs, preference),
   );
   ipcMain.handle("player:cancelPrepared", (_event, id: string) => cancelPreparedTrack(id));
+  ipcMain.handle(
+    "player:transitionPrepared",
+    async (
+      _event,
+      id: string,
+      source: string,
+      remainingMs: number,
+      preference: TransitionPreference,
+      options: LoadOptions = {},
+    ) => {
+      const seq = loadSeq;
+      const current = getPlayer();
+      try {
+        playerLog.info("开始寻找曲尾交接点", {
+          to: options.meta?.title,
+          preference,
+          remainingMs: Math.round(remainingMs),
+        });
+        const endMs = getTransitionEndMs(
+          activeCueRange
+            ? activeCueRange.startMs + activeCueRange.durationMs
+            : toMs(current.getDuration()),
+          toMs(current.getPosition()),
+          current.getSpeed(),
+        );
+        const remainingSeconds =
+          Math.max(0, endMs - toMs(current.getPosition())) / 1000 / current.getSpeed();
+        const meta = await current.transitionToPrepared(
+          id,
+          source,
+          remainingSeconds,
+          preference,
+          options.meta?.cueEndMs == null ? undefined : options.meta.cueEndMs / 1000,
+          endMs / 1000,
+        );
+        if (seq !== loadSeq || current !== getPlayer()) return { success: false };
+        if (!meta) {
+          playerLog.info("交叉过渡未启动，等待正常切歌");
+          return { success: false };
+        }
+        activeCueRange = cueRangeFromTrack(options.meta);
+        const completedSeq = ++loadSeq;
+        cancelPreparedTrack(id);
+        const inst = getPlayer();
+        const state = inst.getStatus().state as PlayerState;
+        const result = completeTrackLoad(
+          source,
+          { ...options, autoPlay: state === "playing" },
+          meta,
+          completedSeq,
+        );
+        const playback = {
+          position: toDisplayPositionMs(toMs(inst.getPosition())),
+          state,
+          speed: inst.getSpeed(),
+          timestamp: Date.now(),
+        };
+        if (options.meta) nowPlaying.prepareTransition(options.meta.id, playback);
+        mediaService.setTimeline({
+          currentMs: playback.position,
+          totalMs: result.data.mediaInfo.duration,
+        });
+        return {
+          ...result,
+          data: {
+            ...result.data,
+            playback,
+          },
+        };
+      } catch (error) {
+        cancelPreparedTrack(id);
+        if (seq !== loadSeq || current !== getPlayer()) return { success: false };
+        return fail(ErrorCode.UNKNOWN, error);
+      }
+    },
+  );
   // 注册实例创建/重建时的回调
   onPlayerCreated(registerNativeEvents);
   onPlayerCreated(startDeviceMonitoring);
@@ -250,8 +466,7 @@ export const registerPlayerIpc = (): void => {
     const authoritative = options.meta ?? null;
     const cueRange = cueRangeFromTrack(authoritative);
     activeCueRange = cueRange;
-    // 非本地音源
-    const isRemote = authoritative != null && authoritative.source !== "local";
+    setCurrentTransitionRange();
     const seq = ++loadSeq;
     if (!options.preparedId) cancelPreparedTrack();
     try {
@@ -320,76 +535,16 @@ export const registerPlayerIpc = (): void => {
         .finally(() => {
           if (options.preparedId) cancelPreparedTrack(options.preparedId);
         });
+      if (seq !== loadSeq || inst !== getPlayer()) return fail(ErrorCode.LOAD_SUPERSEDED);
       if (cueRange) {
         if (meta.preparedPosition !== cueRange.startMs / 1000)
           await inst.seek(cueRange.startMs / 1000);
+        if (seq !== loadSeq || inst !== getPlayer()) return fail(ErrorCode.LOAD_SUPERSEDED);
         if (autoPlay) await inst.play();
       }
-      const nativeDurationMs = toMs(meta.duration);
-      const durationMs = toDisplayDurationMs(nativeDurationMs);
-      const fallbackTitle = meta.title || source.split(/[/\\]/).pop() || source;
-      const displayTitle = authoritative?.title ?? fallbackTitle;
-      const displayArtists = authoritative
-        ? (authoritative.artists ?? [])
-        : parseArtists(meta.artist ?? "");
-      const displayAlbum = authoritative?.album?.name ?? parseAlbum(meta.album ?? "")?.name ?? "";
-      // 本地封面
-      const localCover = isRemote ? null : (inst.getCoverRaw() ?? null);
-      applyDisplay(displayTitle, displayArtists, displayAlbum, localCover ?? undefined, durationMs);
-      if (!isRemote) setTaskbarThumbnailCover(meta.cover);
-      // Last.fm
-      const primaryArtist = displayArtists[0]?.name ?? "";
-      lastfm.onTrackLoaded({
-        title: displayTitle,
-        artist: primaryArtist,
-        album: displayAlbum,
-        durationMs,
-        autoPlay,
-      });
-      neteaseScrobble.onTrackLoaded(authoritative, options.context, durationMs, autoPlay);
-      // 远端高清封面
-      if (coverFetchUrl) {
-        void fetchBytes(coverFetchUrl).then((buf) => {
-          if (!buf) return;
-          if (seq !== loadSeq) return;
-          mediaService.setMetadata({
-            title: displayTitle,
-            artists: artistNames(displayArtists),
-            album: displayAlbum,
-            coverData: buf,
-            coverUrl,
-            durationMs,
-          });
-          setTaskbarThumbnailCover(buf);
-        });
-      }
-      const quality = {
-        sampleRate: meta.originalSampleRate,
-        channels: meta.channels,
-        bitsPerSample: meta.bitsPerSample,
-        bitRate: meta.bitRate,
-        codec: meta.codec,
-      };
-      const data = {
-        detail: {
-          quality,
-          embeddedLyric: meta.embeddedLyric,
-          externalLyrics: meta.externalLyrics,
-        },
-        mediaInfo: {
-          title: meta.title || displayTitle,
-          artists: authoritative?.artists?.length
-            ? authoritative.artists
-            : parseArtists(meta.artist ?? ""),
-          album: authoritative?.album ?? parseAlbum(meta.album ?? ""),
-          genres: authoritative?.genres?.length ? authoritative.genres : parseGenres(meta.genre),
-          duration: durationMs,
-          cover: isRemote ? undefined : toCacheUrl(meta.cover),
-          quality,
-        },
-      };
-      playerLog.debug(`加载成功: ${displayTitle}`);
-      return { success: true, data };
+      if (seq !== loadSeq || inst !== getPlayer()) return fail(ErrorCode.LOAD_SUPERSEDED);
+      playerLog.debug(`加载成功: ${authoritative?.title ?? meta.title ?? source}`);
+      return completeTrackLoad(source, options, meta, seq);
     } catch (error) {
       if (seq === loadSeq) activeCueRange = null;
       const code = classifyLoadError(error, source);
@@ -430,10 +585,12 @@ export const registerPlayerIpc = (): void => {
 
   // 停止播放并释放资源
   ipcMain.handle("player:stop", () => {
+    loadSeq++;
     try {
       cancelPreparedTrack();
       cancelPendingReinit();
       activeCueRange = null;
+      setCurrentTransitionRange();
       getPlayer().stop();
       return { success: true };
     } catch (error) {
@@ -443,10 +600,12 @@ export const registerPlayerIpc = (): void => {
 
   // 跳转到指定播放位置
   ipcMain.handle("player:seek", async (_event, positionMs: number) => {
+    const seq = ++loadSeq;
     try {
       const enginePositionMs = toEnginePositionMs(positionMs);
       const positionSecs = enginePositionMs / 1000;
       await getPlayer().seek(positionSecs);
+      if (seq !== loadSeq) return { success: false };
       mediaService.setTimeline({
         currentMs: positionMs,
         totalMs: toDisplayDurationMs(toMs(getPlayer().getDuration())),
@@ -733,13 +892,18 @@ export const registerPlayerIpc = (): void => {
           inst.pause();
           break;
         case "Stop":
+          loadSeq++;
+          cancelPreparedTrack();
+          setCurrentTransitionRange();
           inst.stop();
           break;
         case "Seek":
           if (event.positionMs != null) {
+            const seq = ++loadSeq;
             const targetMs = event.positionMs;
             sendToMain("player:event", { type: "seek", data: { position: targetMs } });
-            void inst.seek(targetMs / 1000).then(() => {
+            void inst.seek(toEnginePositionMs(targetMs) / 1000).then(() => {
+              if (seq !== loadSeq || inst !== getPlayer()) return;
               mediaService.setTimeline({
                 currentMs: targetMs,
                 totalMs: toMs(inst.getDuration()),

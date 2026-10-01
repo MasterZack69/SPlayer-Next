@@ -7,9 +7,10 @@
     "installNow": "立即重启安装",
     "goDownload": "前往下载页",
     "goStore": "前往商店更新",
-    "upToDate": "已是最新版本",
+    "upToDate": "当前通道暂无更高版本",
     "readyToast": "更新已就绪，可重启安装",
-    "failed": "更新失败，请稍后重试"
+    "failed": "更新失败，请稍后重试",
+    "installing": "正在启动安装程序"
   },
   "onboarding": {
     "next": "下一步",
@@ -452,6 +453,7 @@
   "player": {
     "prev": "上一首",
     "next": "下一首",
+    "transitioning": "过渡",
     "heartMode": {
       "needLogin": "登录后才能使用心动模式",
       "noSeed": "暂无可用的心动种子歌曲",
@@ -743,6 +745,7 @@
       "update": "更新",
       "language": "语言",
       "playControl": "播放控制",
+      "playbackTransition": "播放过渡",
       "audioSource": "播放音源",
       "scrobble": "听歌打卡",
       "lyricContent": "歌词内容",
@@ -866,6 +869,19 @@
     "loudnessNormalization": {
       "label": "音量均衡",
       "description": "自动调节不同歌曲之间的音量差异"
+    },
+    "transitionMode": {
+      "label": "过渡方式",
+      "description": "调整歌曲在交替时的播放效果",
+      "none": "无过渡",
+      "crossfade": "交叉过渡"
+    },
+    "transitionPreference": {
+      "label": "交接倾向",
+      "description": "调整曲尾交接时机和过渡长度，积极档更早、更长",
+      "conservative": "保守",
+      "standard": "标准",
+      "eager": "积极"
     },
     "songLevel": {
       "label": "在线歌曲音质",
@@ -1725,15 +1741,11 @@
     },
     "updateChannel": {
       "label": "更新通道",
-      "description": "选择正式版、Beta 预览版、Alpha 内测版或 Nightly 持续构建更新",
+      "description": "选择接收更新的通道，切换通道不会自动降级",
       "stable": "正式版",
       "beta": "Beta 预览版",
       "alpha": "Alpha 内测版",
       "nightly": "Nightly 持续构建"
-    },
-    "checkUpdate": {
-      "label": "检查更新",
-      "description": "立即检查是否有新版本"
     },
     "showPerformanceMonitor": {
       "label": "性能监视器",

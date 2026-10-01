@@ -1,3 +1,4 @@
+pub(crate) mod input;
 mod processing;
 mod reader;
 use processing::run_dsp_safely;
@@ -5,6 +6,8 @@ use reader::{build_resamplers, open_source, run_decoding_loop};
 
 pub(crate) mod buffer;
 pub(crate) mod source;
+pub(crate) mod tail;
+pub(crate) mod transition_source;
 
 use std::fs::File;
 use std::sync::Arc;

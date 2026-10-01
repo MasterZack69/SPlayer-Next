@@ -201,6 +201,8 @@ export const useSettingsStore = defineStore(
       snapToLyric: false,
       showLyricInBar: true,
       preloadNextTrack: false,
+      transitionMode: "none",
+      transitionPreference: "standard",
       searchPlayBehavior: "current",
     });
 
@@ -411,11 +413,19 @@ export const useSettingsStore = defineStore(
       storage: localStorage,
       omit: ["system"],
       afterHydrate: ({ store }) => {
-        const { lyric, appearance, preset } = store as unknown as {
+        const { lyric, appearance, preset, player } = store as unknown as {
           lyric: LyricSettings;
           appearance: AppearanceSettings;
           preset: PresetSettings;
+          player: PlayerSettings;
         };
+        if (player.transitionMode !== "crossfade") player.transitionMode = "none";
+        if (
+          player.transitionPreference !== "conservative" &&
+          player.transitionPreference !== "eager"
+        ) {
+          player.transitionPreference = "standard";
+        }
         if (typeof lyric.detectBackgroundLyrics !== "boolean") {
           lyric.detectBackgroundLyrics = true;
         }

@@ -172,6 +172,8 @@ export interface MediaInfo {
 /** 播放器加载后返回的完整数据 */
 export interface LoadResult {
   detail: TrackDetail;
+  /** 交接完成时的真实播放锚点，避免将已经播放的新曲重置到零 */
+  playback?: { position: number; state: PlayerState; speed: number; timestamp: number };
   /** 引擎从音频流提取的元数据，用于 enrich 渲染层已持有的 Track */
   mediaInfo: MediaInfo;
 }
@@ -211,9 +213,14 @@ export interface AudioDevice {
 }
 
 /** 主进程推送给渲染进程的播放事件 */
+/** 曲尾交接时机与淡化时长偏好 */
+export type TransitionPreference = "conservative" | "standard" | "eager";
+
 export type PlayerEvent =
   | { type: "status"; data: PlayerStatus }
   | { type: "position"; data: { position: number; duration: number } }
+  | { type: "transitionReady"; data: { id: string; position: number; endPosition?: number } }
+  | { type: "transition"; data: { active: boolean; mode: "crossfade" } }
   | { type: "seek"; data: { position: number } }
   | { type: "ended" }
   | { type: "sourceError" }
@@ -284,12 +291,33 @@ export interface PlayerApi {
    * @param startMs - 预载起点，单位为毫秒，默认为 0
    * @returns 预载就绪时返回 true，任务被取消或取代时返回 false
    */
-  prepareNext(id: string, source: string, startMs?: number): Promise<boolean>;
+  prepareNext(
+    id: string,
+    source: string,
+    startMs?: number,
+    preference?: TransitionPreference,
+  ): Promise<boolean>;
   /**
    * 取消指定预载任务并释放缓存租约，不影响其他代次的任务
    * @param id - 要取消的预载任务标识
    */
   cancelPrepared(id: string): Promise<void>;
+  /**
+   * 在现有输出流中交叉切换到已准备的下一曲
+   * @param id - 预载槽位标识
+   * @param source - 下一曲缓存音源路径
+   * @param remainingMs - 当前曲目剩余的墙钟时间
+   * @param preference - 曲尾交接时机与淡化时长偏好
+   * @param options - 下一曲的权威元数据和播放上下文
+   * @returns 交接成功时返回下一曲信息，未命中时返回失败响应
+   */
+  transitionPrepared(
+    id: string,
+    source: string,
+    remainingMs: number,
+    preference: TransitionPreference,
+    options: LoadOptions,
+  ): Promise<IpcResponse<LoadResult>>;
   /** 加载音频（本地路径或网络地址）；可选下发权威 meta 用于 SMTC/托盘 */
   load: (source: string, options?: LoadOptions) => Promise<IpcResponse<LoadResult>>;
   /** 恢复播放 */

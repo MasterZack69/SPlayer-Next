@@ -20,6 +20,8 @@ const PLATFORM_TO_PLUGIN_SOURCE: Record<Platform, string> = {
 
 /** 解析选项 */
 export interface ResolveTrackSourceOptions {
+  /** 将解析失败原因交给播放流程，供提示和跳曲决策使用 */
+  onError?: (error: string) => void;
   /** 要跳过的插件 ID 列表 */
   skipPluginIds?: readonly string[];
   /** 是否跳过官方在线接口，直接进入插件兜底 */
@@ -179,7 +181,7 @@ const resolveOnlineUrl = async (
       }
     } catch (err) {
       console.warn("[audio-source] official URL resolve failed:", err);
-      officialErrorCode = ErrorCode.URL_RESOLVE_FAILED;
+      officialErrorCode = ErrorCode.NETWORK_ERROR;
     }
   }
   if (track.source === "qqmusic" && !options.skipOfficialOnline) {
@@ -191,7 +193,7 @@ const resolveOnlineUrl = async (
       officialErrorCode = resolved.errorCode;
     } catch (err) {
       console.warn("[audio-source] official QQMusic URL resolve failed:", err);
-      officialErrorCode = ErrorCode.URL_RESOLVE_FAILED;
+      officialErrorCode = ErrorCode.NETWORK_ERROR;
     }
   }
   if (track.source === "kugou" && !options.skipOfficialOnline) {
@@ -203,7 +205,7 @@ const resolveOnlineUrl = async (
       officialErrorCode = resolved.errorCode;
     } catch (err) {
       console.warn("[audio-source] official Kugou URL resolve failed:", err);
-      officialErrorCode = ErrorCode.URL_RESOLVE_FAILED;
+      officialErrorCode = ErrorCode.NETWORK_ERROR;
     }
   }
   const pluginResolved = await resolveByPlugin(track, songLevel, options.skipPluginIds ?? []);
@@ -238,10 +240,11 @@ export interface ResolvedTrackSource {
 /**
  * 记录解析错误，支持静默模式抑制
  * @param err - 错误信息或错误码
- * @param silent - 是否开启静默模式
+ * @param options - 提示方式和错误接收回调
  */
-const reportLoadError = (err: ErrorCode | string, silent?: boolean): void => {
-  if (!silent) handleError(err);
+const reportLoadError = (err: ErrorCode | string, options: ResolveTrackSourceOptions): void => {
+  options.onError?.(err);
+  if (!options.silent) handleError(err);
 };
 
 /**
@@ -257,6 +260,7 @@ export const resolveTrackSource = async (
   // 本地文件
   if (track.source === "local") {
     const localPath = track.cueAudioPath ?? track.path;
+    if (!localPath) reportLoadError(ErrorCode.FILE_NOT_FOUND, options);
     return localPath ? { source: localPath, fromCache: false, provider: "local" } : null;
   }
   const settings = useSettingsStore();
@@ -299,7 +303,7 @@ export const resolveTrackSource = async (
       }
       return result;
     } catch (err) {
-      reportLoadError(err instanceof Error ? err.message : String(err), options.silent);
+      reportLoadError(err instanceof Error ? err.message : String(err), options);
       return null;
     }
   }
@@ -308,7 +312,7 @@ export const resolveTrackSource = async (
     try {
       const resolved = await resolveOnlineUrl(track, songLevel, options);
       if (!resolved.ok) {
-        reportLoadError(resolved.errorCode, options.silent);
+        reportLoadError(resolved.errorCode, options);
         return null;
       }
       const url = resolved.url;
@@ -326,7 +330,7 @@ export const resolveTrackSource = async (
       }
       return result;
     } catch (err) {
-      reportLoadError(err instanceof Error ? err.message : String(err), options.silent);
+      reportLoadError(err instanceof Error ? err.message : String(err), options);
       return null;
     }
   }

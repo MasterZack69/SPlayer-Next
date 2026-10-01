@@ -5,7 +5,13 @@ import type { Track } from "@shared/types/player";
 
 const mocks = vi.hoisted(() => ({
   settings: {
-    player: { preloadNextTrack: true, songLevel: "hq", allowTrialPlay: false },
+    player: {
+      preloadNextTrack: true,
+      songLevel: "hq",
+      allowTrialPlay: false,
+      transitionMode: "crossfade",
+      transitionPreference: "standard",
+    },
     system: {
       cache: { songCache: { enabled: true, cacheStreaming: true } },
       lyric: { enableOnlineTTMLLyric: false },
@@ -23,6 +29,7 @@ const mocks = vi.hoisted(() => ({
   status: {
     currentTrack: { id: "current" },
     state: "playing",
+    trackLoading: false,
     playIndex: 0,
     fmMode: false,
     shuffleMode: "off",
@@ -51,9 +58,13 @@ describe("下一曲真实预载", () => {
     vi.resetModules();
     vi.clearAllMocks();
     mocks.resolve.mockReset();
-    mocks.status = reactive({ ...mocks.status, state: "playing" });
+    mocks.status = reactive({ ...mocks.status, state: "playing", trackLoading: false });
+    mocks.settings = reactive(mocks.settings);
     mocks.settings.player.preloadNextTrack = true;
+    mocks.settings.player.transitionMode = "crossfade";
+    mocks.settings.player.transitionPreference = "standard";
     mocks.settings.system.cache.songCache = { enabled: true, cacheStreaming: true };
+    mocks.candidate.track = { id: "next", source: "netease" };
     mocks.prepare.mockResolvedValue(true);
     mocks.cancel.mockResolvedValue(undefined);
     Object.assign(window, {
@@ -203,6 +214,77 @@ describe("下一曲真实预载", () => {
     expect(preloader.consumePreloadedTrack(mocks.candidate.track as Track)?.preparedId).toBe(id);
   });
 
+  it("替换播放列表后等待当前曲加载完成，再准备下一首槽位", async () => {
+    mocks.candidate.track.source = "local";
+    mocks.resolve.mockResolvedValue({
+      source: "C:/music/next.flac",
+      provider: "local",
+      fromCache: false,
+    });
+    const preloader = await import("./nextTrackPreloader");
+
+    mocks.status.trackLoading = true;
+    preloader.scheduleNextTrackPreload();
+    await flushPromises();
+    expect(mocks.resolve).not.toHaveBeenCalled();
+    expect(mocks.prepare).not.toHaveBeenCalled();
+
+    mocks.status.trackLoading = false;
+    preloader.scheduleNextTrackPreload();
+    await flushPromises();
+    expect(mocks.prepare).toHaveBeenCalledOnce();
+    expect(preloader.peekPreparedTrack(mocks.candidate.track as Track)?.preparedId).toBeDefined();
+  });
+
+  it.each([
+    { enabled: false, cacheStreaming: false },
+    { enabled: true, cacheStreaming: false },
+    { enabled: false, cacheStreaming: true },
+  ])("本地歌曲不依赖网络缓存开关：%j", async (cache) => {
+    mocks.settings.system.cache.songCache = cache;
+    mocks.candidate.track.source = "local";
+    mocks.resolve.mockResolvedValue({
+      source: "C:/music/next.flac",
+      provider: "local",
+      fromCache: false,
+    });
+    const preloader = await import("./nextTrackPreloader");
+    preloader.scheduleNextTrackPreload();
+    await flushPromises();
+    expect(mocks.prepare).toHaveBeenCalledWith(
+      expect.any(String),
+      "C:/music/next.flac",
+      undefined,
+      "standard",
+    );
+    expect(preloader.peekPreparedTrack(mocks.candidate.track as Track)?.preparedId).toBeDefined();
+  });
+
+  it("关闭缓存时本地 CUE 仍按片段起点准备", async () => {
+    mocks.settings.system.cache.songCache = { enabled: false, cacheStreaming: false };
+    Object.assign(mocks.candidate.track, {
+      source: "local",
+      cueAudioPath: "C:/music/album.flac",
+      cueStartMs: 120000,
+      cueEndMs: 240000,
+    });
+    mocks.resolve.mockResolvedValue({
+      source: "C:/music/album.flac",
+      provider: "local",
+      fromCache: false,
+    });
+    const preloader = await import("./nextTrackPreloader");
+    preloader.scheduleNextTrackPreload();
+    await flushPromises();
+    expect(mocks.prepare).toHaveBeenCalledWith(
+      expect.any(String),
+      "C:/music/album.flac",
+      120000,
+      "standard",
+    );
+    expect(preloader.peekPreparedTrack(mocks.candidate.track as Track)?.preparedId).toBeDefined();
+  });
+
   it("等待缓存完成后才准备原生槽位，并将缓存路径与代次交给切歌", async () => {
     let finish!: (path: string) => void;
     const cacheRequest = vi.fn(
@@ -224,7 +306,7 @@ describe("下一曲真实预载", () => {
     finish("C:/cache/next.bin");
     await flushPromises();
     const id = mocks.prepare.mock.calls[0]![0];
-    expect(mocks.prepare).toHaveBeenCalledWith(id, "C:/cache/next.bin", undefined);
+    expect(mocks.prepare).toHaveBeenCalledWith(id, "C:/cache/next.bin", undefined, "standard");
     const result = preloader.consumePreloadedTrack(mocks.candidate.track as Track);
     expect(result?.preparedId).toBe(id);
     expect(result?.source?.source).toBe("C:/cache/next.bin");
@@ -303,5 +385,46 @@ describe("下一曲真实预载", () => {
     expect(
       preloader.consumePreloadedTrack(mocks.candidate.track as Track)?.preparedId,
     ).toBeUndefined();
+  });
+
+  it.each(["关闭过渡", "修改倾向", "关闭预载"])("%s 时保留已提交交接的所有权", async (change) => {
+    mocks.resolve.mockResolvedValue({
+      source: "C:/cache/next.bin",
+      provider: "cache",
+      fromCache: true,
+    });
+    const preloader = await import("./nextTrackPreloader");
+    preloader.installNextTrackPreloadWatchers();
+    preloader.scheduleNextTrackPreload();
+    await flushPromises();
+    const prepared = preloader.beginPreparedTransition(mocks.candidate.track as Track)!;
+    expect(prepared.preparedId).toBeTruthy();
+    if (change === "关闭过渡") mocks.settings.player.transitionMode = "none";
+    if (change === "修改倾向") mocks.settings.player.transitionPreference = "eager";
+    if (change === "关闭预载") mocks.settings.player.preloadNextTrack = false;
+    await flushPromises();
+    expect(mocks.cancel).not.toHaveBeenCalled();
+    expect(mocks.prepare).toHaveBeenCalledOnce();
+    expect(preloader.consumePreloadedTrack(mocks.candidate.track as Track)).toBeNull();
+    expect(mocks.cancel).not.toHaveBeenCalled();
+    preloader.finishPreparedTransition(prepared.preparedId!);
+    await flushPromises();
+    expect(mocks.cancel).toHaveBeenCalledWith(prepared.preparedId);
+    expect(mocks.prepare).toHaveBeenCalledTimes(change === "关闭预载" ? 1 : 2);
+  });
+
+  it("迟到槽位通知不能取走当前备用槽位", async () => {
+    mocks.resolve.mockResolvedValue({
+      source: "C:/cache/next.bin",
+      provider: "cache",
+      fromCache: true,
+    });
+    const preloader = await import("./nextTrackPreloader");
+    preloader.scheduleNextTrackPreload();
+    await flushPromises();
+    expect(
+      preloader.beginPreparedTransition(mocks.candidate.track as Track, "old-slot"),
+    ).toBeNull();
+    expect(preloader.peekPreparedTrack(mocks.candidate.track as Track)?.preparedId).toBeTruthy();
   });
 });

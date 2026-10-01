@@ -24,6 +24,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       has_new_commits: ${{ steps.check.outputs.has_new_commits }}
+      build_sha: ${{ steps.check.outputs.build_sha }}
       prev_sha: ${{ steps.check.outputs.prev_sha }}
     steps:
       - name: Check out dev branch
@@ -35,6 +36,7 @@ jobs:
         id: check
         shell: bash
         run: |
+          echo "build_sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
           NIGHTLY_TAG="nightly"
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             echo "手动触发构建，直接继续执行"
@@ -90,7 +92,7 @@ jobs:
       - name: Check out git repository
         uses: actions/checkout@v5
         with:
-          ref: dev
+          ref: ${{ needs.check-commits.outputs.build_sha }}
           fetch-depth: 0
 
       - name: Setup pnpm
@@ -188,7 +190,7 @@ jobs:
       - name: Check out dev branch
         uses: actions/checkout@v5
         with:
-          ref: dev
+          ref: ${{ needs.check-commits.outputs.build_sha }}
           fetch-depth: 0
 
       - name: Setup Node.js

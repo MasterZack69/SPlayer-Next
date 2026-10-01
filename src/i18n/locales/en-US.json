@@ -7,9 +7,10 @@
     "installNow": "Restart & Install",
     "goDownload": "Go to Download",
     "goStore": "Update in Store",
-    "upToDate": "You're on the latest version",
+    "upToDate": "No newer version is available on this channel",
     "readyToast": "Update ready — restart to install",
-    "failed": "Update failed, please try again later"
+    "failed": "Update failed, please try again later",
+    "installing": "Starting installer"
   },
   "onboarding": {
     "next": "Next",
@@ -464,6 +465,7 @@
   "player": {
     "prev": "Previous",
     "next": "Next",
+    "transitioning": "Transition",
     "heartMode": {
       "needLogin": "Sign in to use Heart Mode",
       "noSeed": "No seed track available for Heart Mode",
@@ -755,6 +757,7 @@
       "update": "Update",
       "language": "Language",
       "playControl": "Playback Control",
+      "playbackTransition": "Playback Transition",
       "audioSource": "Audio Source",
       "scrobble": "Scrobble",
       "lyricContent": "Lyric Content",
@@ -878,6 +881,19 @@
     "loudnessNormalization": {
       "label": "Loudness Normalization",
       "description": "Automatically balance volume levels between tracks"
+    },
+    "transitionMode": {
+      "label": "Transition mode",
+      "description": "Adjust how songs sound when they change",
+      "none": "No transition",
+      "crossfade": "Crossfade"
+    },
+    "transitionPreference": {
+      "label": "Handoff preference",
+      "description": "Adjust when the transition starts and how long songs overlap; Eager starts earlier and lasts longer",
+      "conservative": "Conservative",
+      "standard": "Standard",
+      "eager": "Eager"
     },
     "songLevel": {
       "label": "Online Audio Quality",
@@ -1737,15 +1753,11 @@
     },
     "updateChannel": {
       "label": "Update Channel",
-      "description": "Choose between Stable, Beta preview, Alpha internal, or Nightly updates",
+      "description": "Choose which releases to receive. Switching channels never automatically downgrades the app.",
       "stable": "Stable",
       "beta": "Beta Preview",
       "alpha": "Alpha Experimental",
       "nightly": "Nightly Build"
-    },
-    "checkUpdate": {
-      "label": "Check for Updates",
-      "description": "Check for a new version now"
     },
     "showPerformanceMonitor": {
       "label": "Performance Monitor",
