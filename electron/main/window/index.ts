@@ -1,6 +1,7 @@
 export { createWindow } from "./create";
 export {
   createMainWindow,
+  enableMainWindowCloseRequests,
   getMainWindow,
   focusMainWindow,
   showReadyMainWindow,

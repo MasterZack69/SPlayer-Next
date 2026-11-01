@@ -3,7 +3,9 @@ import { useSettingsStore } from "@/stores/settings";
 import SRadio from "@/components/ui/SRadio.vue";
 import SCheckbox from "@/components/ui/SCheckbox.vue";
 
-/** 主窗口控制 */
+let closePending = false;
+
+/** Control the main window and apply the shared close preference. */
 export const useWindowControls = () => {
   const { t } = useI18n();
   const settings = useSettingsStore();
@@ -18,45 +20,51 @@ export const useWindowControls = () => {
   const hide = (): void => window.api.window.hide();
   const quit = (): void => window.api.window.quit();
 
-  /** 点击关闭：已记忆走设置，未记忆弹窗询问 */
+  /** Apply the saved close action or ask once while any close request is pending. */
   const close = async (): Promise<void> => {
-    const { appearance } = settings;
-    if (appearance.rememberCloseChoice) {
-      appearance.closeAction === "hide" ? hide() : quit();
-      return;
-    }
-    const choice = ref<"quit" | "hide">(appearance.closeAction);
-    const remember = ref(false);
-    const confirmed = await dialog.confirm({
-      title: t("settings.closeDialog.title"),
-      description: t("settings.closeDialog.description"),
-      body: () =>
-        h("div", { class: "flex flex-col gap-4" }, [
-          h("div", { class: "flex flex-col gap-3" }, [
-            h(SRadio, {
-              checked: choice.value === "quit",
-              label: t("settings.closeDialog.quit"),
-              onChange: () => (choice.value = "quit"),
-            }),
-            h(SRadio, {
-              checked: choice.value === "hide",
-              label: t("settings.closeDialog.hide"),
-              onChange: () => (choice.value = "hide"),
+    if (closePending) return;
+    closePending = true;
+    try {
+      const { appearance } = settings;
+      if (appearance.rememberCloseChoice) {
+        appearance.closeAction === "hide" ? hide() : quit();
+        return;
+      }
+      const choice = ref<"quit" | "hide">(appearance.closeAction);
+      const remember = ref(false);
+      const confirmed = await dialog.confirm({
+        title: t("settings.closeDialog.title"),
+        description: t("settings.closeDialog.description"),
+        body: () =>
+          h("div", { class: "flex flex-col gap-4" }, [
+            h("div", { class: "flex flex-col gap-3" }, [
+              h(SRadio, {
+                checked: choice.value === "quit",
+                label: t("settings.closeDialog.quit"),
+                onChange: () => (choice.value = "quit"),
+              }),
+              h(SRadio, {
+                checked: choice.value === "hide",
+                label: t("settings.closeDialog.hide"),
+                onChange: () => (choice.value = "hide"),
+              }),
+            ]),
+            h(SCheckbox, {
+              checked: remember.value,
+              label: t("settings.closeDialog.remember"),
+              "onUpdate:checked": (v: boolean) => (remember.value = v),
             }),
           ]),
-          h(SCheckbox, {
-            checked: remember.value,
-            label: t("settings.closeDialog.remember"),
-            "onUpdate:checked": (v: boolean) => (remember.value = v),
-          }),
-        ]),
-    });
-    if (!confirmed) return;
-    if (remember.value) {
-      appearance.closeAction = choice.value;
-      appearance.rememberCloseChoice = true;
+      });
+      if (!confirmed) return;
+      if (remember.value) {
+        appearance.closeAction = choice.value;
+        appearance.rememberCloseChoice = true;
+      }
+      choice.value === "hide" ? hide() : quit();
+    } finally {
+      closePending = false;
     }
-    choice.value === "hide" ? hide() : quit();
   };
 
   let offMax: (() => void) | null = null;

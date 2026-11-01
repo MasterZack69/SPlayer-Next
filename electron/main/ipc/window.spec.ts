@@ -5,6 +5,7 @@ const mocks = vi.hoisted(() => ({
   on: vi.fn(),
   sender: {},
   showReady: vi.fn(),
+  closeReady: vi.fn(),
   showError: vi.fn(),
   quit: vi.fn(),
   logError: vi.fn(),
@@ -21,6 +22,7 @@ vi.mock("@main/utils/logger", () => ({ coreLog: { error: mocks.logError } }));
 vi.mock("@main/window", () => ({
   getMainWindow: () => ({ webContents: mocks.sender }),
   showReadyMainWindow: mocks.showReady,
+  enableMainWindowCloseRequests: mocks.closeReady,
 }));
 
 import { registerWindowIpc } from "./window";
@@ -41,6 +43,7 @@ describe("启动窗口 IPC 职责", () => {
     await shown;
     expect(mocks.showReady).toHaveBeenCalledOnce();
     expect(complete).not.toHaveBeenCalled();
+    expect(mocks.closeReady).not.toHaveBeenCalled();
     expect(mocks.showError).not.toHaveBeenCalled();
   });
 
@@ -50,6 +53,7 @@ describe("启动窗口 IPC 职责", () => {
     )![1];
     handler({ sender: mocks.sender });
     expect(complete).toHaveBeenCalledOnce();
+    expect(mocks.closeReady).toHaveBeenCalledOnce();
     expect(mocks.showReady).not.toHaveBeenCalled();
     expect(mocks.showError).not.toHaveBeenCalled();
   });
@@ -62,6 +66,7 @@ describe("启动窗口 IPC 职责", () => {
     const failed = mocks.on.mock.calls.find(([channel]) => channel === "window:startupFailed")![1];
     failed({ sender: {} }, "加载失败");
     expect(complete).not.toHaveBeenCalled();
+    expect(mocks.closeReady).not.toHaveBeenCalled();
     expect(mocks.showReady).not.toHaveBeenCalled();
     expect(mocks.showError).not.toHaveBeenCalled();
     expect(mocks.quit).not.toHaveBeenCalled();
@@ -75,5 +80,6 @@ describe("启动窗口 IPC 职责", () => {
     expect(mocks.quit).toHaveBeenCalledOnce();
     expect(mocks.showReady).not.toHaveBeenCalled();
     expect(complete).not.toHaveBeenCalled();
+    expect(mocks.closeReady).not.toHaveBeenCalled();
   });
 });

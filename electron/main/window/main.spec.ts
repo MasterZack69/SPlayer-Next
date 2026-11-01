@@ -7,9 +7,11 @@ const mocks = vi.hoisted(() => ({
   order: [] as string[],
   settings: {} as Record<string, unknown>,
   createWindow: vi.fn(),
+  quit: vi.fn(),
+  quitting: false,
 }));
 
-vi.mock("electron", () => ({ shell: { openExternal: vi.fn() } }));
+vi.mock("electron", () => ({ app: { quit: mocks.quit }, shell: { openExternal: vi.fn() } }));
 vi.mock("@electron-toolkit/utils", () => ({ is: { dev: false } }));
 vi.mock("./create", () => ({ createWindow: mocks.createWindow }));
 vi.mock("@main/utils/logger", () => ({ coreLog: { error: vi.fn() } }));
@@ -26,16 +28,19 @@ vi.mock("@main/utils/protocol", () => ({
   MAIN_PARTITION: "persist:main",
   handleCacheProtocolOnPartition: vi.fn(),
 }));
-vi.mock("@main/utils/lifecycle", () => ({ isAppQuitting: () => false }));
+vi.mock("@main/utils/lifecycle", () => ({ isAppQuitting: () => mocks.quitting }));
 vi.mock("@main/utils/broadcast", () => ({ broadcast: vi.fn() }));
 vi.mock("@main/utils/config", () => ({ isWin: false }));
 
 beforeEach(() => {
   vi.resetModules();
   mocks.order = [];
+  mocks.quitting = false;
+  mocks.quit.mockClear();
   mocks.settings = { "system.onboardingCompleted": true, "system.agreedAgreementVersion": 100 };
   mocks.main = Object.assign(new EventEmitter(), {
     webContents: Object.assign(new EventEmitter(), {
+      send: vi.fn(),
       setWindowOpenHandler: vi.fn(),
       setZoomFactor: vi.fn(),
       getZoomFactor: () => 1,
@@ -47,6 +52,7 @@ beforeEach(() => {
       mocks.order.push("main-show");
       mocks.main.emit("show");
     }),
+    hide: vi.fn(),
     focus: vi.fn(),
     maximize: vi.fn(() => mocks.order.push("maximize")),
   });
@@ -134,5 +140,50 @@ describe("主窗口启动交接", () => {
     mocks.main.emit("ready-to-show");
     await expect(shown).rejects.toThrow("主窗口已关闭");
     expect(mocks.main.show).not.toHaveBeenCalled();
+  });
+});
+
+describe("native window close", () => {
+  it("sends a close request instead of hiding the running app", async () => {
+    const service = await import("./main");
+    service.createMainWindow();
+    service.enableMainWindowCloseRequests();
+    const event = { preventDefault: vi.fn() };
+    mocks.main.emit("close", event);
+    expect(event.preventDefault).toHaveBeenCalledOnce();
+    expect(mocks.main.webContents.send).toHaveBeenCalledWith("window:closeRequested");
+    expect(mocks.main.hide).not.toHaveBeenCalled();
+    expect(mocks.quit).not.toHaveBeenCalled();
+  });
+
+  it.each(["startup", "did-start-loading", "render-process-gone"])(
+    "quits rather than hiding when the renderer cannot handle close during %s",
+    async (phase) => {
+      const service = await import("./main");
+      service.createMainWindow();
+      if (phase !== "startup") {
+        service.enableMainWindowCloseRequests();
+        mocks.main.webContents.emit(phase);
+      }
+      const event = { preventDefault: vi.fn() };
+      mocks.main.emit("close", event);
+      expect(event.preventDefault).toHaveBeenCalledOnce();
+      expect(mocks.quit).toHaveBeenCalledOnce();
+      expect(mocks.main.hide).not.toHaveBeenCalled();
+      expect(mocks.main.webContents.send).not.toHaveBeenCalled();
+    },
+  );
+
+  it("lets explicit application shutdown close the window without another prompt", async () => {
+    const service = await import("./main");
+    service.createMainWindow();
+    service.enableMainWindowCloseRequests();
+    mocks.quitting = true;
+    const event = { preventDefault: vi.fn() };
+    mocks.main.emit("close", event);
+    expect(event.preventDefault).not.toHaveBeenCalled();
+    expect(mocks.main.webContents.send).not.toHaveBeenCalled();
+    expect(mocks.main.hide).not.toHaveBeenCalled();
+    expect(mocks.quit).not.toHaveBeenCalled();
   });
 });

@@ -1,7 +1,19 @@
 <script setup lang="ts">
+import { useWindowControls } from "@/composables/useWindowControls";
 import { useSettingsStore } from "@/stores/settings";
 
 const settings = useSettingsStore();
+const route = useRoute();
+const { close, quit } = useWindowControls();
+let offCloseRequested: (() => void) | undefined;
+
+onMounted(() => {
+  offCloseRequested = window.api.window.onCloseRequested(() => {
+    if (route.name === "onboarding" || route.name === "agreement-update") quit();
+    else void close();
+  });
+});
+onBeforeUnmount(() => offCloseRequested?.());
 
 watchEffect(() => {
   document.documentElement.toggleAttribute("data-reduced-motion", settings.reducedMotion);

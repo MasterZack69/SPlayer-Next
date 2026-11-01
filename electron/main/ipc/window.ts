@@ -2,6 +2,7 @@ import { app, dialog, ipcMain } from "electron";
 
 import { coreLog } from "@main/utils/logger";
 import {
+  enableMainWindowCloseRequests,
   minimizeMainWindow,
   toggleMaximizeMainWindow,
   isMainWindowMaximized,
@@ -24,6 +25,7 @@ export const registerWindowIpc = (onStartupComplete: () => void): void => {
 
   ipcMain.handle("window:startupComplete", (event) => {
     if (event.sender !== getMainWindow()?.webContents) throw new Error("窗口来源无效");
+    enableMainWindowCloseRequests();
     onStartupComplete();
   });
 

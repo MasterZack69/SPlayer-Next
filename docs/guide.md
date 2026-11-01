@@ -30,6 +30,8 @@ These are local library and playback statistics, not online recommendations. Emp
 
 Song tables share the same layout, including Genre where applicable. See [Library and metadata](library.md), [Search](search.md), and [Media servers](streaming.md).
 
+The X button and system window-close actions such as **Alt+F4** use the same close preference: quit the app, hide it to the tray, or ask when the choice is not remembered. Cancelling the prompt leaves the window open.
+
 ## Playback and lyrics
 
 **Play All** replaces the queue with the songs currently shown, in their displayed sort order, and starts with the first song. Active search filters are respected. **Shuffle All** starts a shuffled queue instead.

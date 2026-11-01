@@ -305,6 +305,7 @@ const api = {
     isFullscreen: () => ipcRenderer.invoke("window:isFullscreen"),
     onFullscreenChange: (callback: (fullscreen: boolean) => void) =>
       subscribe<boolean>("window:fullscreenChange", callback),
+    onCloseRequested: (callback: () => void) => subscribe<void>("window:closeRequested", callback),
     hide: () => ipcRenderer.send("window:hide"),
     quit: () => ipcRenderer.send("window:quit"),
   },

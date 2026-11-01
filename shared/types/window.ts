@@ -20,6 +20,8 @@ export interface WindowApi {
   isFullscreen: () => Promise<boolean>;
   /** 订阅主窗口全屏状态变化 */
   onFullscreenChange: (callback: (fullscreen: boolean) => void) => () => void;
+  /** Subscribe to native close requests; return a listener cleanup function. */
+  onCloseRequested: (callback: () => void) => () => void;
   /** 隐藏主窗口到托盘 */
   hide: () => void;
   /** 退出应用 */

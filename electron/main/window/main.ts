@@ -20,6 +20,7 @@ const isInternalNavigation = (url: string): boolean => {
 let mainWindow: BrowserWindow | null = null;
 let firstPaint: Promise<void> = Promise.resolve();
 let startupShown = false;
+let closeHandlerReady = false;
 
 /**
  * 创建主窗口
@@ -47,6 +48,7 @@ export const createMainWindow = (): BrowserWindow => {
   });
 
   startupShown = false;
+  closeHandlerReady = false;
   firstPaint = new Promise((resolve) => {
     mainWindow!.once("ready-to-show", resolve);
   });
@@ -58,14 +60,23 @@ export const createMainWindow = (): BrowserWindow => {
     if (startupShown) applyMainWindowZoom();
   });
 
-  // 系统级关闭（alt+F4 / 任务栏右键"关闭窗口"）统一隐藏到托盘；
-  // 退出由渲染端自定义按钮或托盘"退出"菜单走 app.quit() 触发 isAppQuitting=true 放行
+  // Let the renderer apply the same close preference as the custom X button.
   mainWindow.on("close", (event) => {
     if (isAppQuitting()) {
       return;
     }
     event.preventDefault();
-    mainWindow?.hide();
+    if (!closeHandlerReady) {
+      app.quit();
+      return;
+    }
+    mainWindow?.webContents.send("window:closeRequested");
+  });
+  mainWindow.webContents.on("did-start-loading", () => {
+    closeHandlerReady = false;
+  });
+  mainWindow.webContents.on("render-process-gone", () => {
+    closeHandlerReady = false;
   });
   // 最大化
   mainWindow.on("maximize", () => {
@@ -129,6 +140,11 @@ export const createMainWindow = (): BrowserWindow => {
   });
 
   return mainWindow;
+};
+
+/** Enable close prompts only after the startup layer has released the interface. */
+export const enableMainWindowCloseRequests = (): void => {
+  closeHandlerReady = true;
 };
 
 /**
