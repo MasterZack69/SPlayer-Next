@@ -220,6 +220,7 @@ export const useSettingsStore = defineStore(
     /** Miscellaneous display and playback preferences. */
     const preset = reactive<PresetSettings>({
       ignoreMusicGenre: true,
+      hideHomeStats: false,
       skipKeywordsSongs: false,
       skipTrackKeywords: [...DEFAULT_SKIP_TRACK_KEYWORDS],
       hideQualityTag: false,
@@ -381,6 +382,7 @@ export const useSettingsStore = defineStore(
           lyric.detectBackgroundLyrics = true;
         }
         if (typeof preset.ignoreMusicGenre !== "boolean") preset.ignoreMusicGenre = true;
+        if (typeof preset.hideHomeStats !== "boolean") preset.hideHomeStats = false;
         if (!Array.isArray(preset.skipTrackKeywords)) {
           preset.skipTrackKeywords = [...DEFAULT_SKIP_TRACK_KEYWORDS];
         }

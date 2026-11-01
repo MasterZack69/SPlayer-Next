@@ -1,0 +1,40 @@
+import { createApp, nextTick } from "vue";
+import { createPinia, setActivePinia } from "pinia";
+import persistedState from "pinia-plugin-persistedstate";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { useSettingsStore } from "./settings";
+
+/** Hydrate Home preferences using the real persistence plugin. */
+const mountStore = () => {
+  const pinia = createPinia().use(persistedState);
+  createApp({}).use(pinia);
+  setActivePinia(pinia);
+  return useSettingsStore();
+};
+beforeEach(() => localStorage.clear());
+afterEach(() => localStorage.clear());
+
+describe("Home statistics preference", () => {
+  it("keeps statistics visible for new and older saved settings", () => {
+    expect(mountStore().preset.hideHomeStats).toBe(false);
+    localStorage.setItem("settings", JSON.stringify({ preset: { hideQualityTag: true } }));
+    const settings = mountStore();
+    expect(settings.preset.hideHomeStats).toBe(false);
+    expect(settings.preset.hideQualityTag).toBe(true);
+  });
+
+  it("persists both hiding and showing statistics across store hydration", async () => {
+    const settings = mountStore();
+    settings.preset.hideHomeStats = true;
+    await nextTick();
+    expect(mountStore().preset.hideHomeStats).toBe(true);
+    settings.preset.hideHomeStats = false;
+    await nextTick();
+    expect(mountStore().preset.hideHomeStats).toBe(false);
+  });
+
+  it("resets an invalid saved value to the visible default", () => {
+    localStorage.setItem("settings", JSON.stringify({ preset: { hideHomeStats: "true" } }));
+    expect(mountStore().preset.hideHomeStats).toBe(false);
+  });
+});

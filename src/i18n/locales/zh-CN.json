@@ -847,6 +847,10 @@
       "empty": "尚未配置任何关键词",
       "duplicate": "已存在该关键词"
     },
+    "hideHomeStats": {
+      "label": "隐藏首页统计",
+      "description": "隐藏首页的统计区域"
+    },
     "hideQualityTag": {
       "label": "隐藏音质标签",
       "description": "歌曲列表中不显示音质标签"

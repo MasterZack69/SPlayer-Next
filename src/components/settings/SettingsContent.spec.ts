@@ -93,6 +93,22 @@ afterEach(() => {
 });
 
 describe("settings search-result navigation", () => {
+  it("switches category and highlights the selected section heading", async () => {
+    mountContent([{ key: "lastfmEnabled", type: "switch" }]);
+    wrapper
+      .findComponent({ name: "SettingsSearch" })
+      .vm.$emit("select", "services", "section-lastfm", []);
+    await nextTick();
+    await vi.advanceTimersByTimeAsync(100);
+    const heading = wrapper.get("#setting-section-lastfm");
+    expect(heading.element.tagName).toBe("H3");
+    expect(heading.classes()).toContain("animate-highlight-pulse");
+    expect(scrollIntoView.mock.contexts[0]).toBe(heading.element);
+    expect(wrapper.findAll(".animate-highlight-pulse")).toHaveLength(1);
+    await vi.advanceTimersByTimeAsync(2500);
+    expect(heading.classes()).not.toContain("animate-highlight-pulse");
+  });
+
   it("switches category, scrolls to the nested child, and highlights only that child", async () => {
     mountContent([
       {

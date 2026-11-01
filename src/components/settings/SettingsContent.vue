@@ -39,7 +39,7 @@ const onCategorySelect = (id: string) => {
 /**
  * Locate a result, falling back to its nearest rendered ancestor when collapsed.
  * @param categoryId - Category containing the result.
- * @param itemKey - Selected setting key.
+ * @param itemKey - Selected setting key or section-prefixed heading key.
  * @param parentKeys - Ancestor keys ordered from outermost to innermost.
  */
 const onSearchSelect = (categoryId: string, itemKey: string, parentKeys: string[] = []) => {

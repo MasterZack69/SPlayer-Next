@@ -847,6 +847,10 @@
       "empty": "No keywords configured",
       "duplicate": "Keyword already exists"
     },
+    "hideHomeStats": {
+      "label": "Hide Home Stats",
+      "description": "Hide the Stats section on Home"
+    },
     "hideQualityTag": {
       "label": "Hide Quality Tag",
       "description": "Don't show quality tags in song list"

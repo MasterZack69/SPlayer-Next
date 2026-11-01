@@ -21,6 +21,12 @@ const otherCategory: SettingCategory = {
           defaultValue: true,
         },
         {
+          key: "hideHomeStats",
+          type: "switch",
+          binding: { store: "settings", path: "preset.hideHomeStats" },
+          defaultValue: false,
+        },
+        {
           key: "hideQualityTag",
           type: "switch",
           binding: { store: "settings", path: "preset.hideQualityTag" },

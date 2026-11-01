@@ -311,6 +311,8 @@ export interface AppearanceSettings {
 export interface PresetSettings {
   /** Ignore the generic Music genre without rewriting metadata. */
   ignoreMusicGenre: boolean;
+  /** Hide the Home statistics section without changing listening history. */
+  hideHomeStats: boolean;
   /** 跳过指定关键词歌曲 */
   skipKeywordsSongs: boolean;
   /** 跳过指定关键词列表 */

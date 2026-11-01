@@ -9,8 +9,10 @@ const state = await vi.hoisted(async () => {
     loadHero: vi.fn(),
     loadHeader: vi.fn(),
     hero: ref(null),
+    settings: reactive({ preset: { hideHomeStats: false } }),
   };
 });
+vi.mock("@/stores/settings", () => ({ useSettingsStore: () => state.settings }));
 vi.mock("@/stores/library", () => ({ useLibraryStore: () => state.library }));
 vi.mock("@/composables/home/useHomeHeader", () => ({
   useHomeHeader: () => ({ greetingTitle: "Good morning", headerStats: [], load: state.loadHeader }),

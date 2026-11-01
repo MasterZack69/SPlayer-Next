@@ -2,6 +2,7 @@
 defineOptions({ name: "Home" });
 import type { Track } from "@shared/types/player";
 import { useLibraryStore } from "@/stores/library";
+import { useSettingsStore } from "@/stores/settings";
 import HomeStats from "@/components/stats/HomeStats.vue";
 
 import { useHomeHeader } from "@/composables/home/useHomeHeader";
@@ -23,6 +24,7 @@ const {
   load: loadHero,
 } = useDailyRecommend();
 const library = useLibraryStore();
+const settings = useSettingsStore();
 watch(
   () => library.tracks,
   () => {
@@ -135,7 +137,7 @@ const trackNo = (index: number): string => String(index + 1).padStart(2, "0");
           </ul>
         </div>
       </SCard>
-      <HomeStats />
+      <HomeStats v-if="!settings.preset.hideHomeStats" />
     </div>
   </div>
 </template>

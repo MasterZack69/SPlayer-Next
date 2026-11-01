@@ -77,7 +77,9 @@ describe("离线应用功能边界", () => {
   });
   it("places all statistics below the Home hero and redirects the old route", () => {
     const home = source("src/pages/Home.vue");
-    expect(home.indexOf("<HomeStats />")).toBeGreaterThan(home.indexOf("</SCard>"));
+    expect(home.indexOf('<HomeStats v-if="!settings.preset.hideHomeStats" />')).toBeGreaterThan(
+      home.indexOf("</SCard>"),
+    );
     const stats = source("src/components/stats/HomeStats.vue");
     for (const section of ["StatsOverview", "StatsHeatmap", "StatsTopList"])
       expect(stats).toContain(`<${section}`);

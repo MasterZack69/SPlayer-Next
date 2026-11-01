@@ -19,6 +19,8 @@ The **Stats** section below the selection contains:
 - Audio-format distribution.
 - Most-played songs, albums, and artists.
 
+Hide this section with **Settings → Other → Miscellaneous → Hide Home Stats**. It is off by default; hiding the section does not stop listening-history recording.
+
 These are local library and playback statistics, not online recommendations. Empty charts can mean that no qualifying listening events have been recorded yet. There is no separate Stats destination; older `/stats` links open Home.
 
 ## Organize and find music
@@ -46,7 +48,7 @@ Open **Queue** from the player controls to inspect or rearrange upcoming tracks.
 
 ## Settings
 
-Use Settings for appearance, playback, lyrics, shortcuts, services, media sources, local caches, and application information. Settings search includes nested controls and translated descriptions; selecting a result highlights that control, or its nearest visible parent if collapsed. Optional Last.fm integration remains under **Services**. Media-server credentials are separate from those integrations.
+Use Settings for appearance, playback, lyrics, shortcuts, services, media sources, local caches, and application information. Settings search includes section headings, nested controls, and translated descriptions. Selecting a heading scrolls to and highlights that section; selecting a control highlights it, or its nearest visible parent if collapsed. Optional Last.fm integration remains under **Services**. Media-server credentials are separate from those integrations.
 
 Under **Appearance → Transitions & Animations**, enable **Reduce Motion** for lighter interface effects. The system's reduced-motion preference is also honored, including when the app switch is off. Queue dragging still follows the pointer, but skips animated settling.
 

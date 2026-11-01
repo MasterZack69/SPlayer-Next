@@ -64,6 +64,48 @@ afterEach(() => {
 });
 
 describe("translated settings search", () => {
+  it.each(["zh-CN", "en-US"] as const)("finds section headings in %s", async (locale) => {
+    fixtures.schema[0].sections![0].id = "softwareAnimations";
+    mountSearch(locale);
+    const messages = locale === "zh-CN" ? zhCN : enUS;
+    await search(messages.settings.section.softwareAnimations.slice(0, -2));
+    expect(wrapper.findAll(".font-medium").map((item) => item.text())).toEqual([
+      messages.settings.section.softwareAnimations,
+    ]);
+    await wrapper.get(".top-full button").trigger("click");
+    expect(wrapper.emitted("select")).toEqual([["general", "section-softwareAnimations", []]]);
+    expect((wrapper.get("input").element as HTMLInputElement).value).toBe("");
+  });
+
+  it("does not return headings with no rendered controls or missing translations", async () => {
+    fixtures.schema[0].sections = [
+      {
+        id: "softwareAnimations",
+        items: [{ key: "reduceMotion", type: "switch", visible: () => false }],
+      },
+      { id: "missingSection", items: [{ key: "language", type: "select" }] },
+    ];
+    mountSearch();
+    await search("transitions");
+    expect(wrapper.findAll(".font-medium")).toHaveLength(0);
+    await search("missingSection");
+    expect(wrapper.findAll(".font-medium")).toHaveLength(0);
+  });
+
+  it("keeps results available when keyboard focus moves to a heading", async () => {
+    vi.useFakeTimers();
+    fixtures.schema[0].sections![0].id = "softwareAnimations";
+    mountSearch();
+    await search("transitions & anima");
+    (wrapper.get("input").element as HTMLInputElement).focus();
+    const result = wrapper.get(".top-full button");
+    (result.element as HTMLButtonElement).focus();
+    await vi.advanceTimersByTimeAsync(150);
+    expect(wrapper.find(".top-full").exists()).toBe(true);
+    await result.trigger("click");
+    expect(wrapper.emitted("select")?.[0]).toEqual(["general", "section-softwareAnimations", []]);
+  });
+
   it.each(["zh-CN", "en-US"] as const)("uses the custom description in %s", async (locale) => {
     mountSearch(locale);
     const messages = locale === "zh-CN" ? zhCN : enUS;
@@ -137,7 +179,7 @@ describe("translated settings search", () => {
     ];
     mountSearch();
     await search("Last.fm");
-    await wrapper.get(".top-full .cursor-pointer").trigger("mousedown");
+    await wrapper.get(".top-full .cursor-pointer").trigger("click");
     expect(wrapper.emitted("select")).toEqual([
       ["general", "lastfmAccount", ["appearanceStyle", "lastfmEnabled"]],
     ]);

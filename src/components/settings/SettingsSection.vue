@@ -35,7 +35,13 @@ const itemStyle = (i: number) => {
 <template>
   <div v-if="isSectionVisible && visibleItems.length > 0" class="mb-8 last:mb-0">
     <h3
-      class="animate-slide-in-item flex items-center gap-2 text-lg font-semibold text-on-surface mb-3 px-1"
+      :id="`setting-section-${section.id}`"
+      :class="
+        highlightKey === `section-${section.id}`
+          ? 'animate-highlight-pulse rounded-lg'
+          : 'animate-slide-in-item'
+      "
+      class="flex items-center gap-2 text-lg font-semibold text-on-surface mb-3 px-1"
       :style="itemStyle(0)"
     >
       <span class="w-0.75 h-4 rounded-full bg-primary" />
