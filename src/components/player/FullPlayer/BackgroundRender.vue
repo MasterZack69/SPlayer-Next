@@ -46,6 +46,7 @@ const props = withDefaults(defineProps<BackgroundRenderProps>(), {
 const emit = defineEmits<{ ready: [] }>();
 
 const wrapperRef = ref<HTMLDivElement | null>(null);
+const visibility = useDocumentVisibility();
 
 // 外部渲染器实例引用
 const bgRenderRef = shallowRef<AbstractBaseRenderer>();
@@ -72,6 +73,7 @@ const loadAlbum = async (album: string): Promise<void> => {
   try {
     await renderer.setAlbum(album, false);
     if (request !== albumRequest || bgRenderRef.value !== renderer) return;
+    syncRendererMotion();
     readyFrame = requestAnimationFrame(() => {
       readyFrame = requestAnimationFrame(() => {
         readyFrame = 0;
@@ -96,13 +98,15 @@ const updateRendererState = () => {
   syncRendererMotion();
 };
 
-/**
- * 同步流体背景运动状态
- */
+/** Synchronize fluid rendering with playback and window visibility. */
 const syncRendererMotion = () => {
   const renderer = bgRenderRef.value;
   if (!renderer) return;
 
+  if (visibility.value !== "visible") {
+    renderer.pause();
+    return;
+  }
   if (props.playing) {
     renderer.setStaticMode(false);
     renderer.setFlowSpeed(props.flowSpeed);
@@ -176,12 +180,7 @@ watch(
   },
 );
 
-watch(
-  () => props.playing,
-  () => {
-    syncRendererMotion();
-  },
-);
+watch([() => props.playing, visibility], syncRendererMotion);
 
 watch(
   () => props.fps,

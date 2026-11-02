@@ -1,3 +1,4 @@
+import { nextTick, ref } from "vue";
 import { mount, flushPromises } from "@vue/test-utils";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import BackgroundRender from "./BackgroundRender.vue";
@@ -38,6 +39,12 @@ const rendererFixture = () => ({
   dispose: vi.fn(),
 });
 
+const visibility = ref("visible");
+vi.mock("@vueuse/core", async (original) => ({
+  ...(await original<typeof import("@vueuse/core")>()),
+  useDocumentVisibility: () => visibility,
+}));
+
 let frames: Map<number, FrameRequestCallback>;
 let frameId: number;
 
@@ -49,6 +56,7 @@ const paint = () => {
 };
 
 beforeEach(() => {
+  visibility.value = "visible";
   frames = new Map();
   frameId = 0;
   vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
@@ -60,6 +68,23 @@ beforeEach(() => {
 afterEach(() => vi.unstubAllGlobals());
 
 describe("fluid texture readiness", () => {
+  it("pauses while the window is hidden and resumes on return", async () => {
+    const renderer = rendererFixture();
+    createRenderer.mockReturnValue(renderer);
+    const wrapper = mount(BackgroundRender, { props: { album: "cover.jpg", playing: true } });
+    await flushPromises();
+    renderer.pause.mockClear();
+    renderer.resume.mockClear();
+    visibility.value = "hidden";
+    await nextTick();
+    expect(renderer.pause).toHaveBeenCalledOnce();
+    expect(renderer.resume).not.toHaveBeenCalled();
+    visibility.value = "visible";
+    await nextTick();
+    expect(renderer.resume).toHaveBeenCalledOnce();
+    wrapper.unmount();
+  });
+
   it("waits for the current cover to paint, not an older in-flight cover", async () => {
     const first = pendingAlbum();
     const second = pendingAlbum();

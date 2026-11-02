@@ -6,6 +6,12 @@ Now Playing uses **AMLL** for lyric playback. There is no second engine or engin
 
 Lyrics come from local sidecar files, embedded audio metadata, or the configured media server. The client does not search public music platforms or an online TTML database for a match. A media server can supply its own lyrics; that is distinct from public lyric lookup.
 
+## Player bar and estimated timing
+
+**Settings → Appearance → Show Lyric While Playing** can show the original lyric, the lyric with translation, or word-by-word highlighting in the player bar. The translation mode is the default. The artist returns when lyrics are unavailable or playback is paused.
+
+**Settings → Lyrics → Auto-generate Word Effect** is off by default. When enabled, it estimates timing across visible graphemes for eligible line-timed lyrics; this is an approximation, not actual word timing. Existing word timings are retained. Turning it off reparses the original lyrics.
+
 ## Local files and TTML
 
 Keep a sidecar lyric file with its matching audio file, using the same base filename, for example `Song.flac` and `Song.lrc` or `Song.ttml`. The local loader chooses a recognized sidecar according to the lyric-format priority, then falls back to embedded lyrics if necessary.

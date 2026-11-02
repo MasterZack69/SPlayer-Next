@@ -3,11 +3,31 @@ import { defineComponent, h } from "vue";
 import { mount, flushPromises } from "@vue/test-utils";
 import { createRouter, createMemoryHistory } from "vue-router";
 import { createI18n } from "vue-i18n";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import en from "@/i18n/locales/en-US.json";
 import { PAGE_SEARCH_SCOPES } from "@/utils/search/match";
 import { usePageSearch } from "@/composables/usePageSearch";
 import NavSearch from "./NavSearch.vue";
+
+const commandMocks = vi.hoisted(() => ({ show: vi.fn(), dispatch: vi.fn() }));
+vi.mock("@/core/hotkey/registry", () => ({ dispatch: commandMocks.dispatch }));
+vi.mock("@/settings/useSettingsDialog", () => ({
+  useSettingsDialog: () => ({ show: commandMocks.show }),
+}));
+vi.mock("@/settings/searchSettings", () => ({
+  searchSettings: (word: string) =>
+    word === "animations"
+      ? [
+          {
+            categoryId: "appearance",
+            itemKey: "section-softwareAnimations",
+            parentKeys: [],
+            label: "Transitions & Animations",
+            categoryLabel: "Appearance",
+          },
+        ]
+      : [],
+}));
 
 const Input = defineComponent({
   props: { modelValue: String, placeholder: String },
@@ -73,6 +93,31 @@ const setup = async (path = "/") => {
 };
 
 describe("navigation search", () => {
+  it("runs slash commands without changing the underlying scoped filter", async () => {
+    const { wrapper, router } = await setup("/album-list?filter=Existing");
+    const input = wrapper.get("input");
+    await input.trigger("focusin");
+    await input.setValue("/animations");
+    await flushPromises();
+    expect(router.currentRoute.value.query.filter).toBe("Existing");
+    await vi.waitFor(() => expect(wrapper.text()).toContain("Transitions & Animations"));
+    await input.trigger("keydown", { key: "Enter" });
+    expect(commandMocks.show).toHaveBeenCalledWith("appearance", "section-softwareAnimations", []);
+    expect((input.element as HTMLInputElement).value).toBe("Existing");
+    wrapper.unmount();
+  });
+  it("dismisses commands with Escape and restores the existing query", async () => {
+    const { wrapper, router } = await setup("/search?q=Existing");
+    const input = wrapper.get("input");
+    await input.trigger("focusin");
+    await input.setValue("/next");
+    await flushPromises();
+    await input.trigger("keydown", { key: "Escape" });
+    expect(router.currentRoute.value.query.q).toBe("Existing");
+    expect((input.element as HTMLInputElement).value).toBe("Existing");
+    wrapper.unmount();
+  });
+
   it("opens global results from Home as soon as the user types, without Enter", async () => {
     const { wrapper, router } = await setup();
     expect(wrapper.get("input").attributes("placeholder")).toBe("Search all music…");

@@ -3,6 +3,7 @@ import { useStatusStore } from "@/stores/status";
 const open = ref(false);
 const initialCategory = ref("general");
 const initialHighlight = ref<string>();
+const initialParentKeys = ref<string[]>([]);
 
 /**
  * 设置弹窗控制
@@ -12,15 +13,18 @@ export const useSettingsDialog = () => ({
   open,
   initialCategory,
   initialHighlight,
+  initialParentKeys,
 
   /**
-   * 打开设置弹窗
-   * @param category - 本次定向到的分类
-   * @param highlight - 需高亮定位的设置项 key
+   * Open settings at an optional category and result.
+   * @param category - Target category.
+   * @param highlight - Setting to highlight.
+   * @param parents - Ancestor keys for collapsed settings.
    */
-  show: (category?: string, highlight?: string) => {
+  show: (category?: string, highlight?: string, parents: string[] = []) => {
     initialCategory.value = category ?? (useStatusStore().settingsCategory || "general");
     initialHighlight.value = highlight;
+    initialParentKeys.value = parents;
     open.value = true;
   },
 

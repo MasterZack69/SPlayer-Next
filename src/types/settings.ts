@@ -11,7 +11,7 @@ import type { QualityLevel } from "@/utils/quality";
 export type PlayerBgType = "blur" | "solid" | "animation";
 /** 流体背景渲染引擎 */
 export type PlayerBgRenderer = "mesh" | "isolation" | "pixi";
-export type CoverLayout = "default" | "fullscreen";
+export type CoverLayout = "default" | "fullscreen" | "lyrics";
 
 /**
  * 歌曲播放时间显示格式
@@ -136,6 +136,8 @@ export interface LyricSettings {
   preferPluginLyric: boolean;
   /** 自动识别背景歌词 */
   detectBackgroundLyrics: boolean;
+  /** Estimate word timing for line-timed lyrics. */
+  autoGenerateWordByWord: boolean;
   /** 中文繁简转换模式（基于 OpenCC） */
   cjkTransform: CjkTransformMode;
   /** 字号自适应窗口大小 */
@@ -256,6 +258,8 @@ export interface PlayerSettings {
   snapToLyric: boolean;
   /** 播放时底部显示歌词而非歌手名 */
   showLyricInBar: boolean;
+  /** Content displayed in the player bar. */
+  barLyricMode: "lyric" | "translation" | "word";
   /** 播放时提前获取下一首的播放数据 */
   preloadNextTrack: boolean;
   /** 相邻曲目的播放过渡方式 */

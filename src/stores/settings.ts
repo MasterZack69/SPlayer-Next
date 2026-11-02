@@ -211,6 +211,7 @@ export const useSettingsStore = defineStore(
       showProgressLyric: false,
       snapToLyric: false,
       showLyricInBar: true,
+      barLyricMode: "translation",
       preloadNextTrack: false,
       transitionMode: "none",
       transitionPreference: "standard",
@@ -235,6 +236,7 @@ export const useSettingsStore = defineStore(
       smartPreferOnline: false,
       preferPluginLyric: false,
       detectBackgroundLyrics: true,
+      autoGenerateWordByWord: false,
       cjkTransform: "none",
       adaptiveFontSize: true,
       fontSize: 48,
@@ -352,6 +354,11 @@ export const useSettingsStore = defineStore(
           preset: PresetSettings;
           player: PlayerSettings;
         };
+        if (!["lyric", "translation", "word"].includes(player.barLyricMode))
+          player.barLyricMode = "translation";
+        if (!["default", "fullscreen", "lyrics"].includes(player.coverLayout))
+          player.coverLayout = "default";
+        if (typeof lyric.autoGenerateWordByWord !== "boolean") lyric.autoGenerateWordByWord = false;
         if (player.transitionMode !== "crossfade") player.transitionMode = "none";
         if (
           player.transitionPreference !== "conservative" &&

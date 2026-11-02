@@ -199,6 +199,10 @@
     "reload": "热重载",
     "devtools": "开发者工具",
     "globalSettings": "全局设置",
+    "commandTitle": "命令",
+    "commandHint": "输入设置、页面或操作",
+    "commandPages": "页面",
+    "commandActions": "操作",
     "searchPlaceholder": "搜索所有音乐…",
     "searchEmpty": "输入关键词开始搜索",
     "searchGoto": "搜索「{keyword}」",
@@ -873,6 +877,13 @@
       "current": "仅播放当前",
       "all": "播放全部"
     },
+    "barLyricMode": {
+      "label": "播放栏歌词模式",
+      "description": "选择播放栏显示的歌词内容",
+      "lyric": "歌词",
+      "translation": "歌词及翻译",
+      "word": "逐字显示"
+    },
     "showLyricInBar": {
       "label": "播放时显示歌词",
       "description": "底部播放栏播放时将歌手名替换为当前歌词"
@@ -996,6 +1007,10 @@
     "preferPluginLyric": {
       "label": "优先使用插件歌词",
       "description": "开启后同时请求插件歌词，若返回更优格式则自动替换"
+    },
+    "autoGenerateWordByWord": {
+      "label": "自动生成逐字效果",
+      "description": "为逐行歌词估算逐字时间"
     },
     "detectBackgroundLyrics": {
       "label": "自动识别背景歌词",
@@ -1270,7 +1285,8 @@
       "label": "封面布局",
       "description": "全屏播放器封面的呈现方式",
       "default": "默认",
-      "fullscreen": "全屏封面"
+      "fullscreen": "全屏封面",
+      "lyrics": "全屏歌词"
     },
     "coverLyricRatio": {
       "label": "封面/歌词占比",

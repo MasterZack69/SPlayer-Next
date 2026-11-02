@@ -40,7 +40,7 @@ The X button and system window-close actions such as **Alt+F4** use the same clo
 
 With only one song in the queue, **Previous** returns to the beginning without changing whether playback is paused. **Next** leaves playback unchanged and displays a notice that there are no other tracks.
 
-Open **Now Playing** for the full player. Lyrics use AMLL; there is no engine selector. Local sidecar files, embedded lyrics, and lyrics supplied by your configured server are supported. See [Lyrics](lyrics.md).
+Open **Now Playing** for the full player. Use the layout button in its top bar, or **Settings → Appearance → Cover Layout**, to choose the default, fullscreen cover, or fullscreen lyrics layout. Lyrics use AMLL; there is no engine selector. Local sidecar files, embedded lyrics, and lyrics supplied by your configured server are supported. See [Lyrics](lyrics.md).
 
 The **Fluid** background starts initializing during player entry rather than first showing a blurred-cover background. Initial rendering still depends on cover decoding and GPU availability.
 
@@ -52,7 +52,7 @@ Use Settings for appearance, playback, lyrics, shortcuts, services, media source
 
 Under **Appearance → Transitions & Animations**, enable **Reduce Motion** for lighter interface effects. The system's reduced-motion preference is also honored, including when the app switch is off. Queue dragging still follows the pointer, but skips animated settling.
 
-**Shared Element Transitions** is off by default. Enable it to animate artwork between a card and its artist/collection detail page, and between the player bar and Now Playing. Reduced motion disables these shared transitions. Unavailable browser support or unloaded artwork falls back to ordinary navigation. Fluid backgrounds continue initializing during player entry.
+**Shared Element Transitions** is off by default. Enable it to animate artwork between a card and its artist/collection detail page, between the player bar and Now Playing, and when switching player layouts. Fullscreen lyrics uses the normal opening transition because it has no cover to match. Reduced motion disables these shared transitions. Unavailable browser support or unloaded artwork falls back to ordinary navigation. Fluid backgrounds continue initializing during player entry.
 
 For installation and build problems, start with [Downloads and installation](download.md) or [Debugging](troubleshooting/debug.md).
 

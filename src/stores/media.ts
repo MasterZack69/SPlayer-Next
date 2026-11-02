@@ -10,6 +10,7 @@ import {
 } from "lyric-kit";
 import { parsePlaybackLyric } from "@/utils/lyric/parse";
 import { applyLyricExclude } from "@/utils/lyric/lyricStripper";
+import { estimateLyricTiming } from "@/utils/lyric/estimatedTiming";
 import { applyLyricCjkTransform } from "@/utils/lyric/cjkTransform";
 
 export const useMediaStore = defineStore("media", () => {
@@ -126,8 +127,12 @@ export const useMediaStore = defineStore("media", () => {
     };
   };
 
+  /** Invalidates pending asynchronous lyric transformations. */
+  let transformToken = 0;
+
   /** Clear lyric metadata while the next source is loading. */
   const resetLyricState = (): void => {
+    transformToken++;
     activeLyric.value = null;
     lyricContent.value = null;
     parsedLyric.value = [];
@@ -138,12 +143,9 @@ export const useMediaStore = defineStore("media", () => {
     syncToMain();
   };
 
-  /** 简繁转换竞态 token */
-  let transformToken = 0;
-
-  // 监听简繁转换设置变化并重新解析当前歌词
+  // Reparse the original lyrics when conversion or estimated timing changes.
   watch(
-    () => useSettingsStore().lyric.cjkTransform,
+    () => [useSettingsStore().lyric.cjkTransform, useSettingsStore().lyric.autoGenerateWordByWord],
     () => {
       if (activeLyric.value && lyricContent.value) {
         setLyric(activeLyric.value, lyricContent.value);
@@ -157,6 +159,7 @@ export const useMediaStore = defineStore("media", () => {
    * @param input - Original lyrics and optional auxiliary tracks; null clears lyrics.
    */
   const setLyric = (source: LyricData, input: LyricInput | null): void => {
+    const token = ++transformToken;
     let nextLines: LyricLine[] = [];
     let authors: string[] = [];
     let songwriters: string[] = [];
@@ -172,6 +175,9 @@ export const useMediaStore = defineStore("media", () => {
         });
         nextLines = applyLyricExclude(result.lines, track.value);
         normalizeLyricLines(nextLines);
+        if (settings.lyric.autoGenerateWordByWord) {
+          nextLines = estimateLyricTiming(nextLines, source.format, track.value?.duration);
+        }
         applyLyricLanguages(nextLines);
         authors = result.metadata.authors?.length
           ? result.metadata.authors
@@ -196,7 +202,6 @@ export const useMediaStore = defineStore("media", () => {
     // 应用 OpenCC 简繁转换
     const cjkMode = settings.lyric.cjkTransform;
     if (hasContent && cjkMode && cjkMode !== "none") {
-      const token = ++transformToken;
       applyLyricCjkTransform(nextLines, cjkMode).then((transformed) => {
         if (token !== transformToken) return;
         parsedLyric.value = transformed;
@@ -215,6 +220,7 @@ export const useMediaStore = defineStore("media", () => {
 
   /** Clear the current track, lyrics and credit metadata. */
   const clear = (): void => {
+    transformToken++;
     track.value = null;
     playbackContext.value = undefined;
     detail.value = null;

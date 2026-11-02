@@ -6,7 +6,12 @@ import { useMediaStore } from "./media";
 
 const settings = reactive({
   locale: "en-US",
-  lyric: { detectBackgroundLyrics: true, cjkTransform: "none", enableExcludeLyrics: false },
+  lyric: {
+    detectBackgroundLyrics: true,
+    cjkTransform: "none",
+    autoGenerateWordByWord: false,
+    enableExcludeLyrics: false,
+  },
 });
 vi.mock("@/stores/settings", () => ({ useSettingsStore: () => settings }));
 vi.mock("@/services/lyric/loader", () => ({ watchLyricPreference: vi.fn() }));
@@ -63,6 +68,7 @@ describe("TTML playback timing integration", () => {
   beforeEach(() => {
     setActivePinia(createPinia());
     settings.lyric.cjkTransform = "none";
+    settings.lyric.autoGenerateWordByWord = false;
     Object.defineProperty(window, "api", {
       configurable: true,
       value: { nowPlaying: { update: vi.fn() } },
@@ -98,6 +104,24 @@ describe("TTML playback timing integration", () => {
     await nextTick();
     expect(media.parsedLyric[0].startTime).toBe(1369);
     expect(media.lyricContent?.content).toBe(content);
+  });
+
+  it("reparses original line-timed lyrics when estimated timing is toggled", async () => {
+    const media = useMediaStore();
+    media.setTrack({ id: "lrc", source: "local", title: "Track", artists: [], duration: 10000 });
+    media.setLyric(
+      { source: "external", format: "lrc" },
+      { content: "[00:01.00]**Hello** world\n[00:05.00]Next" },
+    );
+    const original = media.parsedLyric[0].words;
+    expect(original).toHaveLength(1);
+    settings.lyric.autoGenerateWordByWord = true;
+    await nextTick();
+    expect(media.parsedLyric[0].words.length).toBeGreaterThan(1);
+    expect(media.parsedLyric[0].words.map((word) => word.word).join("")).toBe("**Hello** world");
+    settings.lyric.autoGenerateWordByWord = false;
+    await nextTick();
+    expect(media.parsedLyric[0].words).toEqual(original);
   });
 
   it("does not carry offsets into replacement lyrics or another source layout", () => {

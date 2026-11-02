@@ -4,7 +4,7 @@
 
 The top search field on **Home** opens a dedicated search results page. It searches your indexed local library, local playlists and folders, and the active media server's synchronized library. It does not query public music catalogs or every configured server at once.
 
-Results are grouped into **Songs**, **Albums**, **Artists**, **Genres**, **Playlists**, and **Folders**. **All** shows previews from the available categories; select a category or **Show all** to inspect its results. A newly added server must finish synchronization before its complete library can appear.
+Results are grouped into **Songs**, **Albums**, **Artists**, **Genres**, **Years**, **Playlists**, and **Folders**. **All** shows previews from the available categories; select a category or **Show all** to inspect its results. A newly added server must finish synchronization before its complete library can appear.
 
 Clearing the field with **X** clears the query and its results. Search remains separate from Home rather than injecting a song list into the greeting area.
 
@@ -13,6 +13,10 @@ Clearing the field with **X** clears the query and its results. Search remains s
 On Library, Artists, Albums, Genres, Folders, Liked Songs, and collection pages, the top field filters that page's relevant content. For example, an albums page filters albums, while an album detail page filters its songs. It does not replace the current page with global results.
 
 The extra local Library search bar has been removed. Clear the top field to restore the unfiltered page. Page filters are represented by the route's `filter` query value, so navigation and the field stay synchronized.
+
+## Commands
+
+Type `/` in the top search field to search settings and section headings, navigation pages, and playback actions. Use the arrow keys and Enter, or select a result with the pointer. Escape closes command mode and restores the previous search or page filter. Commands do not search public catalogs.
 
 ## Search playback behavior
 

@@ -7,12 +7,17 @@ import {
   fullPlayerReady,
   playerTransition,
   setPlayerExpanded,
+  switchPlayerLayout,
 } from "./playerTransition";
 
 vi.mock("@/stores/status", () => ({ useStatusStore: () => status }));
 vi.mock("@/stores/settings", () => ({ useSettingsStore: () => settings }));
 const status = reactive({ isPlayerExpanded: false });
-const settings = reactive({ appearance: { seamlessTransition: true }, reducedMotion: false });
+const settings = reactive({
+  appearance: { seamlessTransition: true },
+  reducedMotion: false,
+  player: { coverLayout: "default" },
+});
 let transitions: Array<{
   update: ViewTransitionUpdateCallback;
   ready: ReturnType<typeof Promise.withResolvers<void>>;
@@ -41,6 +46,7 @@ beforeEach(() => {
   status.isPlayerExpanded = false;
   settings.appearance.seamlessTransition = true;
   settings.reducedMotion = false;
+  settings.player.coverLayout = "default";
   fullPlayerReady.value = true;
   coverTransitionActive.value = false;
   transitions = [];
@@ -71,6 +77,29 @@ afterEach(async () => {
 });
 
 describe("Now Playing cover transitions", () => {
+  it("applies rapid layout changes once in order when snapshots are cancelled", async () => {
+    status.isPlayerExpanded = true;
+    switchPlayerLayout(() => {
+      settings.player.coverLayout = "fullscreen";
+    });
+    switchPlayerLayout(() => {
+      settings.player.coverLayout = "lyrics";
+    });
+    expect(transitions[0].skipTransition).toHaveBeenCalledOnce();
+    expect(settings.player.coverLayout).toBe("fullscreen");
+    await updateSnapshot(1);
+    expect(settings.player.coverLayout).toBe("lyrics");
+    await updateSnapshot(0);
+    expect(settings.player.coverLayout).toBe("lyrics");
+    transitions[1].done.resolve();
+  });
+  it("uses normal opening for fullscreen lyrics", () => {
+    settings.player.coverLayout = "lyrics";
+    setPlayerExpanded(true);
+    expect(status.isPlayerExpanded).toBe(true);
+    expect(start).not.toHaveBeenCalled();
+  });
+
   it("matches bar/full covers on open and close and releases snapshot markers", async () => {
     setPlayerExpanded(true);
     expect(document.documentElement.dataset.playerTransition).toBe("expand");

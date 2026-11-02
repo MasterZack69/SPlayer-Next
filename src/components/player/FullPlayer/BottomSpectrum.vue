@@ -24,6 +24,7 @@ const props = withDefaults(defineProps<Props>(), {
 
 const status = useStatusStore();
 const settings = useSettingsStore();
+const visibility = useDocumentVisibility();
 
 const canvasRef = ref<HTMLCanvasElement | null>(null);
 
@@ -168,9 +169,9 @@ const stopCapture = (): void => {
 
 // 暂停时停止 FFT 推送 + RAF 重绘
 watch(
-  () => status.isPlaying,
-  (playing) => {
-    if (playing) startCapture();
+  [() => status.isPlaying, visibility],
+  ([playing, visible]) => {
+    if (playing && visible === "visible") startCapture();
     else stopCapture();
   },
   { immediate: true },

@@ -6,6 +6,61 @@ export const fullPlayerReady = shallowRef(false);
 export const playerTransition = shallowRef<ViewTransition | null>(null);
 export const playerTransitionActive = computed(() => playerTransition.value !== null);
 let covers: HTMLElement[] = [];
+let layoutTransition: ViewTransition | null = null;
+let pendingLayoutUpdate: (() => void) | null = null;
+
+/** Cancel an in-flight layout snapshot before another transition. */
+const cancelLayoutTransition = (): void => {
+  const active = layoutTransition;
+  layoutTransition = null;
+  pendingLayoutUpdate?.();
+  pendingLayoutUpdate = null;
+  active?.skipTransition();
+};
+
+/**
+ * Switch a player layout with an optional reduced-motion-aware snapshot.
+ * @param update - Apply the selected layout.
+ */
+export const switchPlayerLayout = (update: () => void): void => {
+  cancelLayoutTransition();
+  const settings = useSettingsStore();
+  if (
+    !useStatusStore().isPlayerExpanded ||
+    playerTransitionActive.value ||
+    !settings.appearance.seamlessTransition ||
+    settings.reducedMotion ||
+    !document.startViewTransition ||
+    document.hidden ||
+    coverTransitionActive.value
+  ) {
+    update();
+    return;
+  }
+  let applied = false;
+  /** Apply the requested layout once, including when the snapshot is cancelled. */
+  const apply = (): void => {
+    if (applied) return;
+    applied = true;
+    update();
+  };
+  pendingLayoutUpdate = apply;
+  const active = document.startViewTransition(async () => {
+    apply();
+    if (pendingLayoutUpdate === apply) pendingLayoutUpdate = null;
+    await nextTick();
+  });
+  layoutTransition = active;
+  void active.ready.catch(() => {});
+  void active.finished
+    .finally(() => {
+      if (layoutTransition === active) {
+        layoutTransition = null;
+        pendingLayoutUpdate = null;
+      }
+    })
+    .catch(() => {});
+};
 
 /** Release the player snapshot and remove transient cover markers. */
 export const cancelPlayerTransition = (): void => {
@@ -26,6 +81,7 @@ export const cancelPlayerTransition = (): void => {
  * @param expanded - Whether to expand Now Playing.
  */
 export const setPlayerExpanded = (expanded: boolean): void => {
+  cancelLayoutTransition();
   cancelPlayerTransition();
   const status = useStatusStore();
   if (status.isPlayerExpanded === expanded) return;
@@ -35,7 +91,8 @@ export const setPlayerExpanded = (expanded: boolean): void => {
     settings.reducedMotion ||
     !document.startViewTransition ||
     document.hidden ||
-    coverTransitionActive.value
+    coverTransitionActive.value ||
+    (expanded && settings.player.coverLayout === "lyrics")
   ) {
     status.isPlayerExpanded = expanded;
     return;

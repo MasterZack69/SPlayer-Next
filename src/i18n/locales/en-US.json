@@ -199,6 +199,10 @@
     "reload": "Reload",
     "devtools": "Developer Tools",
     "globalSettings": "Global Settings",
+    "commandTitle": "Commands",
+    "commandHint": "Type a setting, page, or action",
+    "commandPages": "Pages",
+    "commandActions": "Actions",
     "searchPlaceholder": "Search all music…",
     "searchEmpty": "Start typing to search",
     "searchGoto": "Search for \"{keyword}\"",
@@ -873,6 +877,13 @@
       "current": "Play Current Track Only",
       "all": "Play All Results"
     },
+    "barLyricMode": {
+      "label": "Player Bar Lyric Mode",
+      "description": "Choose what appears in the player bar",
+      "lyric": "Lyrics",
+      "translation": "Lyrics + Translation",
+      "word": "Word by Word"
+    },
     "showLyricInBar": {
       "label": "Show Lyric While Playing",
       "description": "Replace artist name with current lyric in the bottom player bar"
@@ -996,6 +1007,10 @@
     "preferPluginLyric": {
       "label": "Prefer Plugin Lyrics",
       "description": "Request plugin lyrics concurrently and auto-replace if a higher-ranked format is returned"
+    },
+    "autoGenerateWordByWord": {
+      "label": "Auto-generate Word Effect",
+      "description": "Estimate word timing for line-timed lyrics"
     },
     "detectBackgroundLyrics": {
       "label": "Auto-Detect Background Lyrics",
@@ -1270,7 +1285,8 @@
       "label": "Cover Layout",
       "description": "Cover presentation in the full-screen player",
       "default": "Default",
-      "fullscreen": "Fullscreen"
+      "fullscreen": "Fullscreen",
+      "lyrics": "Fullscreen Lyrics"
     },
     "coverLyricRatio": {
       "label": "Cover/Lyrics Ratio",

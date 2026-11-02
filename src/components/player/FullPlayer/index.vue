@@ -12,9 +12,14 @@ import { useProgressLyric } from "@/composables/useProgressLyric";
 import Lyrics from "@/components/player/Lyrics/index.vue";
 import { useWindowControls } from "@/composables/useWindowControls";
 import * as player from "@/core/player";
-import { playerTransitionActive, setPlayerExpanded } from "@/services/playerTransition";
+import {
+  playerTransitionActive,
+  setPlayerExpanded,
+  switchPlayerLayout,
+} from "@/services/playerTransition";
 import IconFavorite from "~icons/material-symbols/favorite-rounded";
 import IconFavoriteOutline from "~icons/material-symbols/favorite-outline-rounded";
+import type { CoverLayout } from "@/types/settings";
 import IconLucideListPlus from "~icons/lucide/list-plus";
 
 const status = useStatusStore();
@@ -89,6 +94,7 @@ const scheduleVisualizers = (): void => {
 const onLyricReady = (): void => {
   if (!isPlayerExpanded.value) return;
   lyricReady.value = true;
+  syncLyricActivity();
   scheduleVisualizers();
 };
 
@@ -104,9 +110,7 @@ const preparePlayerContent = (): void => {
   lyricMounted.value = true;
   nextTick(() => {
     if (!isPlayerExpanded.value) return;
-    lyricRef.value?.setCurrentTime(getCurrentTime() + status.lyricOffsetMs);
-    lyricRef.value?.resume();
-    startTick();
+    syncLyricActivity();
     if (lyricReady.value) scheduleVisualizers();
     else if (!hasLyric.value) onLyricReady();
   });
@@ -169,10 +173,24 @@ watch(
 );
 
 const fullscreenCover = computed(() => settings.player.coverLayout === "fullscreen");
+const fullscreenLyrics = computed(() => settings.player.coverLayout === "lyrics");
+const layoutOpen = ref(false);
+const layoutOptions: CoverLayout[] = ["default", "fullscreen", "lyrics"];
+/**
+ * Switch layouts while preserving the saved cover preference.
+ * @param layout - Selected player layout.
+ */
+const selectLayout = (layout: CoverLayout): void => {
+  layoutOpen.value = false;
+  if (settings.player.coverLayout === layout) return;
+  switchPlayerLayout(() => {
+    settings.player.coverLayout = layout;
+  });
+};
 const coverWidth = computed(() => `${settings.player.coverLyricRatio * 100}%`);
 
 const coverCentered = computed(() => {
-  if (fullscreenCover.value || status.fullQueueOpen) return false;
+  if (fullscreenCover.value || fullscreenLyrics.value || status.fullQueueOpen) return false;
   return !showLyric.value || (settings.player.autoCenterCover && !hasLyric.value);
 });
 
@@ -209,9 +227,53 @@ const {
   openPicker,
 } = usePlaylistPicker();
 
-const lyricToggleDisabled = computed(() => !hasLyric.value || fullscreenCover.value);
+const lyricToggleDisabled = computed(
+  () => !hasLyric.value || fullscreenCover.value || fullscreenLyrics.value,
+);
 const lyricToggleActive = computed(
-  () => showLyric.value && hasLyric.value && !status.fullQueueOpen && !fullscreenCover.value,
+  () =>
+    showLyric.value &&
+    hasLyric.value &&
+    !status.fullQueueOpen &&
+    !fullscreenCover.value &&
+    !fullscreenLyrics.value,
+);
+
+/** Run lyric rendering only while its surface is visible. */
+const syncLyricActivity = (): void => {
+  const visible =
+    (fullscreenCover.value || fullscreenLyrics.value || showLyric.value) &&
+    hasLyric.value &&
+    !status.fullQueueOpen;
+  if (
+    isPlayerExpanded.value &&
+    enterPrepared &&
+    lyricMounted.value &&
+    visible &&
+    visibility.value === "visible"
+  ) {
+    lyricRef.value?.setCurrentTime(getCurrentTime() + status.lyricOffsetMs);
+    lyricRef.value?.resume();
+    startTick();
+  } else {
+    stopTick();
+    lyricRef.value?.freeze();
+  }
+};
+
+watch(
+  [
+    isPlayerExpanded,
+    lyricMounted,
+    fullscreenCover,
+    fullscreenLyrics,
+    showLyric,
+    hasLyric,
+    () => status.fullQueueOpen,
+    visibility,
+  ],
+  syncLyricActivity,
+  { flush: "post" },
 );
 
 const toggleLyric = (): void => {
@@ -271,7 +333,7 @@ const toggleLyric = (): void => {
         <!-- 顶栏 -->
         <div
           class="absolute top-0 inset-x-0 h-14 z-10 app-drag-region transition-opacity duration-400 flex items-center justify-between px-3"
-          :class="immersive ? 'opacity-0 pointer-events-none' : 'opacity-100'"
+          :class="immersive && !layoutOpen ? 'opacity-0 pointer-events-none' : 'opacity-100'"
           @mouseenter="onBarEnter"
           @mouseleave="onBarLeave"
         >
@@ -289,6 +351,43 @@ const toggleLyric = (): void => {
             </SButton>
           </div>
           <div class="app-no-drag flex items-center gap-3">
+            <SPopover
+              v-model:open="layoutOpen"
+              trigger="click"
+              side="bottom"
+              align="end"
+              :side-offset="8"
+              cover
+            >
+              <template #trigger>
+                <SButton
+                  type="cover"
+                  variant="ghost"
+                  circle
+                  :size="40"
+                  :aria-label="$t('settings.coverLayout.label')"
+                >
+                  <template #icon><IconLucideLayoutTemplate /></template>
+                </SButton>
+              </template>
+              <div
+                class="flex flex-col gap-2"
+                role="group"
+                :aria-label="$t('settings.coverLayout.label')"
+              >
+                <button
+                  v-for="layout in layoutOptions"
+                  :key="layout"
+                  type="button"
+                  class="border-none bg-transparent rounded-lg px-3 py-2 text-left text-cover cursor-pointer hover:bg-cover/10 focus-visible:outline focus-visible:outline-2"
+                  :aria-pressed="settings.player.coverLayout === layout"
+                  :class="settings.player.coverLayout === layout ? 'bg-cover/14' : ''"
+                  @click="selectLayout(layout)"
+                >
+                  {{ $t(`settings.coverLayout.${layout}`) }}
+                </button>
+              </div>
+            </SPopover>
             <SButton type="cover" variant="ghost" circle :size="40" @click="toggleFullscreen">
               <template #icon>
                 <IconLucideMinimize v-if="isFullscreen" />
@@ -302,7 +401,7 @@ const toggleLyric = (): void => {
         <div class="absolute top-14 inset-x-0 bottom-20" @mousemove="onMainMove">
           <!-- 左侧 -->
           <div
-            v-if="!fullscreenCover"
+            v-if="!fullscreenCover && !fullscreenLyrics"
             class="absolute inset-y-0 left-0 flex items-center justify-center px-12 transition-transform duration-600 ease-[cubic-bezier(0.4,0,0.2,1)]"
             :style="{
               width: coverWidth,
@@ -322,17 +421,24 @@ const toggleLyric = (): void => {
           </div>
           <!-- 右侧 -->
           <div
-            class="group absolute inset-y-0 right-0 pr-20 flex flex-col transition-opacity duration-600 ease-[cubic-bezier(0.4,0,0.2,1)]"
-            :class="
+            class="group absolute inset-y-0 right-0 flex flex-col transition-opacity duration-600 ease-[cubic-bezier(0.4,0,0.2,1)]"
+            :class="[
               coverCentered || status.fullQueueOpen
                 ? 'opacity-0 pointer-events-none'
-                : 'opacity-100'
-            "
-            :style="{ width: fullscreenCover ? '50%' : `calc(100% - ${coverWidth})` }"
+                : 'opacity-100',
+              fullscreenLyrics ? 'px-[clamp(1rem,5vw,5rem)]' : 'pr-[clamp(1rem,5vw,5rem)]',
+            ]"
+            :style="{
+              width: fullscreenLyrics
+                ? '100%'
+                : fullscreenCover
+                  ? '50%'
+                  : `calc(100% - ${coverWidth})`,
+            }"
           >
             <!-- 全屏封面 -->
             <div
-              v-if="fullscreenCover"
+              v-if="fullscreenCover || fullscreenLyrics"
               class="shrink-0 pt-2 pb-6 pl-[calc(1em-0.5rem)]"
               :style="{ fontSize: lyricFontSize }"
             >
@@ -381,7 +487,13 @@ const toggleLyric = (): void => {
           <div
             class="absolute inset-y-0 right-0 pl-4 py-6 flex items-center"
             :class="status.fullQueueOpen ? '' : 'pointer-events-none'"
-            :style="{ width: fullscreenCover ? '50%' : `calc(100% - ${coverWidth})` }"
+            :style="{
+              width: fullscreenLyrics
+                ? 'min(100%, 640px)'
+                : fullscreenCover
+                  ? '50%'
+                  : `calc(100% - ${coverWidth})`,
+            }"
           >
             <Transition
               enter-active-class="transition-opacity duration-600 ease-[cubic-bezier(0.4,0,0.2,1)]"

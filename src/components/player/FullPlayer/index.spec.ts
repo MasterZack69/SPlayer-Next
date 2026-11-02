@@ -1,7 +1,7 @@
 import { mount, flushPromises, type VueWrapper } from "@vue/test-utils";
 import { createPinia } from "pinia";
 import { createI18n } from "vue-i18n";
-import { nextTick, ref } from "vue";
+import { nextTick, ref, reactive } from "vue";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useStatusStore } from "@/stores/status";
 import { useMediaStore } from "@/stores/media";
@@ -44,18 +44,17 @@ vi.mock("@/stores/media", async () => {
     }),
   };
 });
-vi.mock("@/stores/settings", () => ({
-  useSettingsStore: () => ({
-    reducedMotion: false,
-    player: { coverLayout: "normal", coverLyricRatio: 0.5, enableSpectrum: true },
-    lyric: { fontSize: 40, translationFontSize: 20, fontWeight: 600, lyricBlendMode: "screen" },
-  }),
-}));
+const playerSettings = reactive({
+  reducedMotion: false,
+  appearance: { seamlessTransition: false },
+  player: { coverLayout: "default", coverLyricRatio: 0.5, enableSpectrum: true },
+  lyric: { fontSize: 40, translationFontSize: 20, fontWeight: 600, lyricBlendMode: "screen" },
+});
+vi.mock("@/stores/settings", () => ({ useSettingsStore: () => playerSettings }));
 vi.mock("@/core/player", () => ({ isSeeking: () => false }));
 vi.mock("@/services/playback", () => ({ getCurrentTime: () => 1234 }));
-vi.mock("@/composables/usePlaybackTime", () => ({
-  usePlaybackTime: () => ({ start: vi.fn(), stop: vi.fn() }),
-}));
+const playbackMocks = vi.hoisted(() => ({ start: vi.fn(), stop: vi.fn() }));
+vi.mock("@/composables/usePlaybackTime", () => ({ usePlaybackTime: () => playbackMocks }));
 vi.mock("@/composables/useFavorite", () => ({
   useFavorite: () => ({ isLiked: () => false, isSupported: () => true }),
 }));
@@ -133,6 +132,8 @@ const mountPlayer = () => {
         PlaylistPickerDialog: true,
         QueuePanel: true,
         SButton: true,
+        SPopover: { template: '<div><slot name="trigger"/><slot/></div>' },
+        IconLucideLayoutTemplate: true,
         SIconSwap: true,
         SSlider: true,
         Toolbar: true,
@@ -153,6 +154,8 @@ const runIdle = (): void => {
 beforeEach(() => {
   vi.useFakeTimers();
   visibility.value = "visible";
+  playerSettings.player.coverLayout = "default";
+  vi.clearAllMocks();
   idle = new Map();
   vi.stubGlobal("requestIdleCallback", (callback: IdleRequestCallback) => {
     idle.set(++sequence, callback);
@@ -168,6 +171,49 @@ afterEach(() => {
 });
 
 describe("Now Playing initialization", () => {
+  it("freezes lyrics for the queue and hidden window, including fullscreen cover", async () => {
+    const { status } = mountPlayer();
+    status.isPlayerExpanded = true;
+    await vi.advanceTimersByTimeAsync(100);
+    wrapper.findComponent(Lyrics).vm.$emit("ready");
+    await nextTick();
+    expect(playbackMocks.start).toHaveBeenCalled();
+    status.fullQueueOpen = true;
+    await nextTick();
+    expect(playbackMocks.stop).toHaveBeenCalled();
+    playerSettings.player.coverLayout = "fullscreen";
+    status.showLyric = false;
+    status.fullQueueOpen = false;
+    playbackMocks.start.mockClear();
+    await nextTick();
+    expect(playbackMocks.start).toHaveBeenCalled();
+    visibility.value = "hidden";
+    playbackMocks.stop.mockClear();
+    await nextTick();
+    expect(playbackMocks.stop).toHaveBeenCalled();
+    visibility.value = "visible";
+    playbackMocks.start.mockClear();
+    await nextTick();
+    expect(playbackMocks.start).toHaveBeenCalled();
+  });
+  it("offers fullscreen lyrics without showing a cover and restores other layouts", async () => {
+    const { status } = mountPlayer();
+    status.isPlayerExpanded = true;
+    await vi.advanceTimersByTimeAsync(100);
+    const buttons = wrapper.findAll("button");
+    const lyrics = buttons.find((button) => button.text() === "settings.coverLayout.lyrics");
+    expect(lyrics).toBeTruthy();
+    await lyrics!.trigger("click");
+    expect(playerSettings.player.coverLayout).toBe("lyrics");
+    expect(wrapper.findComponent({ name: "PlayerCover" }).exists()).toBe(false);
+    const normal = wrapper
+      .findAll("button")
+      .find((button) => button.text() === "settings.coverLayout.default");
+    await normal!.trigger("click");
+    expect(playerSettings.player.coverLayout).toBe("default");
+    expect(wrapper.findComponent({ name: "PlayerCover" }).exists()).toBe(true);
+  });
+
   it("always uses normal lyric blending even if a legacy preference is present", async () => {
     const { status } = mountPlayer();
     status.isPlayerExpanded = true;

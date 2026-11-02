@@ -38,3 +38,24 @@ describe("Home statistics preference", () => {
     expect(mountStore().preset.hideHomeStats).toBe(false);
   });
 });
+
+describe("player layout and lyric preferences", () => {
+  it("preserves existing layout and uses compatible defaults", () => {
+    localStorage.setItem("settings", JSON.stringify({ player: { coverLayout: "fullscreen" } }));
+    const settings = mountStore();
+    expect(settings.player.coverLayout).toBe("fullscreen");
+    expect(settings.player.barLyricMode).toBe("translation");
+    expect(settings.lyric.autoGenerateWordByWord).toBe(false);
+  });
+  it("persists new player and lyric choices", async () => {
+    const settings = mountStore();
+    settings.player.coverLayout = "lyrics";
+    settings.player.barLyricMode = "word";
+    settings.lyric.autoGenerateWordByWord = true;
+    await nextTick();
+    const restored = mountStore();
+    expect(restored.player.coverLayout).toBe("lyrics");
+    expect(restored.player.barLyricMode).toBe("word");
+    expect(restored.lyric.autoGenerateWordByWord).toBe(true);
+  });
+});

@@ -29,6 +29,12 @@ const lyricCategory: SettingCategory = {
           defaultValue: true,
         },
         {
+          key: "autoGenerateWordByWord",
+          type: "switch",
+          binding: { store: "settings", path: "lyric.autoGenerateWordByWord" },
+          defaultValue: false,
+        },
+        {
           key: "cjkTransform",
           type: "select",
           binding: { store: "settings", path: "lyric.cjkTransform" },
