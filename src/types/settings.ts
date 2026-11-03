@@ -11,7 +11,7 @@ import type { QualityLevel } from "@/utils/quality";
 export type PlayerBgType = "blur" | "solid" | "animation";
 /** 流体背景渲染引擎 */
 export type PlayerBgRenderer = "mesh" | "isolation" | "pixi";
-export type CoverLayout = "default" | "fullscreen" | "lyrics";
+export type CoverLayout = "default" | "fullscreen" | "lyrics" | "am";
 
 /**
  * 歌曲播放时间显示格式

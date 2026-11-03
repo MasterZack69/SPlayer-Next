@@ -14,8 +14,10 @@ const props = withDefaults(
   defineProps<{
     /** 是否使用封面主题 */
     cover?: boolean;
+    /** Use AM-style queue artwork in the full player. */
+    am?: boolean;
   }>(),
-  { cover: false },
+  { cover: false, am: false },
 );
 
 const { t } = useI18n();
@@ -111,9 +113,15 @@ const onMoreMenuSelect = (key: string): void => {
       circle
       size="large"
       :class="status.fullQueueOpen ? undefined : mutedClass"
+      :aria-label="t('settings.hotkeys.actions.togglePlaylist')"
+      :aria-pressed="status.fullQueueOpen"
       @click="status.fullQueueOpen = !status.fullQueueOpen"
     >
-      <template #icon><IconLucideListMusic /></template>
+      <template #icon>
+        <IconSpAmPlaylistActive v-if="am && status.fullQueueOpen" />
+        <IconSpAmPlaylist v-else-if="am" />
+        <IconLucideListMusic v-else />
+      </template>
     </SButton>
     <!-- 常规播放列表气泡 -->
     <SPopover

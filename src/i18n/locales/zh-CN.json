@@ -484,6 +484,16 @@
     }
   },
   "player": {
+    "am": {
+      "trackDetails": "歌曲详情",
+      "favorite": "切换收藏",
+      "addToPlaylist": "添加到歌单",
+      "seek": "播放进度",
+      "timeFormat": "切换时间显示",
+      "volume": "音量",
+      "collapse": "收起播放器",
+      "lyrics": "切换歌词"
+    },
     "noOtherTracks": "队列中没有其他歌曲",
     "prev": "上一首",
     "next": "下一首",
@@ -1286,7 +1296,8 @@
       "description": "全屏播放器封面的呈现方式",
       "default": "默认",
       "fullscreen": "全屏封面",
-      "lyrics": "全屏歌词"
+      "lyrics": "全屏歌词",
+      "am": "AM 风格"
     },
     "coverLyricRatio": {
       "label": "封面/歌词占比",

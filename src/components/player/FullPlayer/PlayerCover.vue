@@ -2,7 +2,10 @@
 import { useMediaStore } from "@/stores/media";
 import { useStatusStore } from "@/stores/status";
 
-withDefaults(defineProps<{ fullscreen?: boolean }>(), { fullscreen: false });
+withDefaults(defineProps<{ fullscreen?: boolean; am?: boolean }>(), {
+  fullscreen: false,
+  am: false,
+});
 
 const media = useMediaStore();
 const status = useStatusStore();
@@ -36,12 +39,14 @@ watchEffect(async () => {
     :class="
       fullscreen
         ? 'player-cover-fullscreen w-full h-full aspect-auto rounded-none bg-transparent overflow-hidden shrink-0'
-        : [
-            'player-cover',
-            'w-full aspect-square rounded-[32px] overflow-hidden shrink-0',
-            'shadow-[0_0_20px_10px_rgba(0,0,0,0.1)]',
-            isPlaying ? 'scale-100' : 'scale-90',
-          ]
+        : am
+          ? 'player-cover-am w-full aspect-square rounded-xl overflow-hidden shrink-0 shadow-[0_16px_40px_rgba(0,0,0,0.3)]'
+          : [
+              'player-cover',
+              'w-full aspect-square rounded-[32px] overflow-hidden shrink-0',
+              'shadow-[0_0_20px_10px_rgba(0,0,0,0.1)]',
+              isPlaying ? 'scale-100' : 'scale-90',
+            ]
     "
   >
     <DetailCover :src="coverSrc" :fallback="displayTrack?.cover" class="size-full" />
@@ -49,10 +54,25 @@ watchEffect(async () => {
 </template>
 
 <style scoped>
+.player-cover-am {
+  transition: box-shadow 500ms ease-out;
+}
+
 .player-cover {
   transition:
     transform 500ms cubic-bezier(0.34, 1.56, 0.64, 1),
-    box-shadow 200ms ease-out;
+    box-shadow 500ms ease-out;
+}
+
+:global(html[data-reduced-motion] .player-cover),
+:global(html[data-reduced-motion] .player-cover-am) {
+  transition: none;
+}
+@media (prefers-reduced-motion: reduce) {
+  .player-cover,
+  .player-cover-am {
+    transition: none;
+  }
 }
 
 .player-cover-fullscreen {

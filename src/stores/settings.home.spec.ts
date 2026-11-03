@@ -47,6 +47,15 @@ describe("player layout and lyric preferences", () => {
     expect(settings.player.barLyricMode).toBe("translation");
     expect(settings.lyric.autoGenerateWordByWord).toBe(false);
   });
+  it("persists AM layout and preserves older layout values", async () => {
+    const settings = mountStore();
+    settings.player.coverLayout = "am";
+    await nextTick();
+    expect(mountStore().player.coverLayout).toBe("am");
+    settings.player.coverLayout = "default";
+    await nextTick();
+    expect(mountStore().player.coverLayout).toBe("default");
+  });
   it("persists new player and lyric choices", async () => {
     const settings = mountStore();
     settings.player.coverLayout = "lyrics";

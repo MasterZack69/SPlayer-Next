@@ -174,8 +174,9 @@ watch(
 
 const fullscreenCover = computed(() => settings.player.coverLayout === "fullscreen");
 const fullscreenLyrics = computed(() => settings.player.coverLayout === "lyrics");
+const amLayout = computed(() => settings.player.coverLayout === "am");
 const layoutOpen = ref(false);
-const layoutOptions: CoverLayout[] = ["default", "fullscreen", "lyrics"];
+const layoutOptions: CoverLayout[] = ["default", "fullscreen", "lyrics", "am"];
 /**
  * Switch layouts while preserving the saved cover preference.
  * @param layout - Selected player layout.
@@ -191,7 +192,9 @@ const coverWidth = computed(() => `${settings.player.coverLyricRatio * 100}%`);
 
 const coverCentered = computed(() => {
   if (fullscreenCover.value || fullscreenLyrics.value || status.fullQueueOpen) return false;
-  return !showLyric.value || (settings.player.autoCenterCover && !hasLyric.value);
+  return (
+    !showLyric.value || ((amLayout.value || settings.player.autoCenterCover) && !hasLyric.value)
+  );
 });
 
 const handleLyricSeek = async (timeMs: number): Promise<void> => {
@@ -339,6 +342,7 @@ const toggleLyric = (): void => {
         >
           <div class="app-no-drag flex items-center gap-2">
             <SButton
+              v-if="!amLayout"
               type="cover"
               variant="ghost"
               circle
@@ -397,11 +401,46 @@ const toggleLyric = (): void => {
             <WindowControls cover />
           </div>
         </div>
+        <div
+          v-if="amLayout"
+          class="app-no-drag absolute top-4 left-1/2 -translate-x-1/2 z-20 transition-opacity"
+          :class="immersive ? 'opacity-0 pointer-events-none' : 'opacity-100'"
+          @mouseenter="onBarEnter"
+          @mouseleave="onBarLeave"
+        >
+          <SButton
+            type="cover"
+            variant="ghost"
+            size="auto"
+            class="px-4 py-3 rounded-full"
+            :aria-label="$t('player.am.collapse')"
+            @click="setPlayerExpanded(false)"
+          >
+            <span class="block w-14 h-1.2 rounded-full bg-cover/40" />
+          </SButton>
+        </div>
         <!-- 主区域 -->
-        <div class="absolute top-14 inset-x-0 bottom-20" @mousemove="onMainMove">
+        <div
+          class="absolute top-14 inset-x-0 bottom-20"
+          :class="amLayout ? 'am-main' : ''"
+          @mousemove="onMainMove"
+        >
+          <div
+            v-if="amLayout"
+            class="am-left absolute inset-y-0 left-0 w-[45%] flex items-center justify-center transition-transform duration-500"
+            :class="coverCentered ? 'am-centered' : ''"
+          >
+            <div class="am-column w-[min(50vh,38vw)] flex flex-col gap-[clamp(0.5rem,4vh,2.5rem)]">
+              <PlayerCover am />
+              <AmControls
+                v-if="playerVisible"
+                @add-to-playlist="displayTrack && openPicker([displayTrack])"
+              />
+            </div>
+          </div>
           <!-- 左侧 -->
           <div
-            v-if="!fullscreenCover && !fullscreenLyrics"
+            v-if="!fullscreenCover && !fullscreenLyrics && !amLayout"
             class="absolute inset-y-0 left-0 flex items-center justify-center px-12 transition-transform duration-600 ease-[cubic-bezier(0.4,0,0.2,1)]"
             :style="{
               width: coverWidth,
@@ -427,13 +466,16 @@ const toggleLyric = (): void => {
                 ? 'opacity-0 pointer-events-none'
                 : 'opacity-100',
               fullscreenLyrics ? 'px-[clamp(1rem,5vw,5rem)]' : 'pr-[clamp(1rem,5vw,5rem)]',
+              amLayout ? 'am-right' : '',
             ]"
             :style="{
-              width: fullscreenLyrics
-                ? '100%'
-                : fullscreenCover
-                  ? '50%'
-                  : `calc(100% - ${coverWidth})`,
+              width: amLayout
+                ? '55%'
+                : fullscreenLyrics
+                  ? '100%'
+                  : fullscreenCover
+                    ? '50%'
+                    : `calc(100% - ${coverWidth})`,
             }"
           >
             <!-- 全屏封面 -->
@@ -486,13 +528,15 @@ const toggleLyric = (): void => {
           <!-- 播放队列 -->
           <div
             class="absolute inset-y-0 right-0 pl-4 py-6 flex items-center"
-            :class="status.fullQueueOpen ? '' : 'pointer-events-none'"
+            :class="[status.fullQueueOpen ? '' : 'pointer-events-none', amLayout ? 'am-queue' : '']"
             :style="{
-              width: fullscreenLyrics
-                ? 'min(100%, 640px)'
-                : fullscreenCover
-                  ? '50%'
-                  : `calc(100% - ${coverWidth})`,
+              width: amLayout
+                ? '55%'
+                : fullscreenLyrics
+                  ? 'min(100%, 640px)'
+                  : fullscreenCover
+                    ? '50%'
+                    : `calc(100% - ${coverWidth})`,
             }"
           >
             <Transition
@@ -509,6 +553,31 @@ const toggleLyric = (): void => {
         </div>
         <!-- 底栏 -->
         <div
+          v-if="amLayout"
+          class="absolute bottom-0 inset-x-0 h-20 z-10 flex items-center justify-end gap-2 px-4 transition-opacity duration-400"
+          :class="immersive ? 'opacity-0 pointer-events-none' : 'opacity-100'"
+          @mouseenter="onBarEnter"
+          @mouseleave="onBarLeave"
+        >
+          <SButton
+            type="cover"
+            variant="ghost"
+            circle
+            size="large"
+            :disabled="!hasLyric"
+            :aria-label="$t('player.am.lyrics')"
+            :aria-pressed="lyricToggleActive"
+            @click="toggleLyric"
+          >
+            <template #icon>
+              <IconSpAmLyricsActive v-if="lyricToggleActive" />
+              <IconSpAmLyrics v-else />
+            </template>
+          </SButton>
+          <Toolbar cover am />
+        </div>
+        <div
+          v-else
           class="absolute bottom-0 inset-x-0 h-20 z-10 flex items-center gap-4 px-4 transition-opacity duration-400"
           :class="immersive ? 'opacity-0 pointer-events-none' : 'opacity-100'"
           @mouseenter="onBarEnter"
@@ -657,6 +726,60 @@ const toggleLyric = (): void => {
 </template>
 
 <style scoped>
+.am-left {
+  overflow-y: auto;
+}
+.am-column {
+  margin: auto;
+  flex-shrink: 0;
+}
+.am-centered {
+  transform: translateX(calc(50vw - 50%));
+}
+@media (max-width: 700px) {
+  .am-left {
+    top: 0;
+    bottom: auto;
+    width: 100%;
+    height: 52%;
+    padding: 0 1rem;
+    overflow-y: auto;
+  }
+  .am-left.am-centered {
+    height: 100%;
+    transform: none;
+  }
+  .am-column {
+    width: min(100%, 480px);
+    flex-direction: row;
+    align-items: center;
+    gap: 0.75rem;
+  }
+  .am-column :deep(.player-cover-am) {
+    width: min(28vw, 22vh);
+    align-self: center;
+  }
+  .am-column :deep(.am-controls) {
+    flex: 1;
+    min-width: 0;
+  }
+  .am-right,
+  .am-queue {
+    top: 52%;
+    bottom: 0;
+    width: 100% !important;
+    padding: 0 1rem;
+  }
+}
+:global(html[data-reduced-motion] .am-left) {
+  transition: none;
+}
+@media (prefers-reduced-motion: reduce) {
+  .am-left {
+    transition: none;
+  }
+}
+
 .lyric-area {
   filter: drop-shadow(0px 4px 6px rgba(0, 0, 0, 0.2));
   mask: linear-gradient(

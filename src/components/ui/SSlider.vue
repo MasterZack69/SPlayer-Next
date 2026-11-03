@@ -22,6 +22,12 @@ export interface SSliderProps {
   trackHeight?: number;
   /** 拖拽点大小（px） */
   thumbSize?: number;
+  /** Expanded track thickness during hover or drag. */
+  hoverTrackHeight?: number;
+  /** Hide the thumb while keeping the track interactive. */
+  hideThumb?: boolean;
+  /** Accessible label; enables keyboard interaction. */
+  label?: string;
   /** 刻度标记：{ 值: 标签 } */
   marks?: Record<number, string>;
   /** 垂直方向 */
@@ -46,6 +52,9 @@ const props = withDefaults(defineProps<SSliderProps>(), {
   popoverOffset: 8,
   trackHeight: 4,
   thumbSize: 14,
+  hoverTrackHeight: undefined,
+  hideThumb: false,
+  label: undefined,
   marks: undefined,
   vertical: false,
   centerFill: false,
@@ -111,6 +120,7 @@ const dragValue = ref(props.modelValue);
 /** popover 为避免贴边溢出的水平修正量 */
 const popoverShift = ref(0);
 let popoverFrame = 0;
+let dragStartValue = 0;
 
 /** 外部 modelValue 变化时同步到内部（拖拽中忽略，避免冲突） */
 watch(
@@ -154,7 +164,19 @@ const centerFillStyle = computed(() => {
 
 /** 拖拽点是否可见（始终显示 / hover / 拖拽中） */
 const thumbVisible = computed(
-  () => (props.alwaysShowThumb || isHovering.value || isDragging.value) && !props.glow,
+  () =>
+    !props.hideThumb &&
+    (props.alwaysShowThumb || isHovering.value || isDragging.value) &&
+    !props.glow,
+);
+
+/** Track and hitbox sizes for expanding sliders. */
+const currentTrackSize = computed(
+  () =>
+    `${props.hoverTrackHeight && (isHovering.value || isDragging.value) ? props.hoverTrackHeight : props.trackHeight}px`,
+);
+const hitboxSize = computed(
+  () => `${Math.max(props.thumbSize, props.trackHeight, props.hoverTrackHeight ?? 0)}px`,
 );
 
 /** 将值转换为轨道上的百分比位置 */
@@ -229,6 +251,7 @@ const onPointerDown = (e: PointerEvent): void => {
   if (props.disabled) return;
   e.preventDefault();
   (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+  dragStartValue = props.modelValue;
   isDragging.value = true;
   const value = calcValueFromEvent(e);
   dragValue.value = value;
@@ -251,12 +274,40 @@ const onPointerUp = (): void => {
   emit("update:modelValue", dragValue.value);
   emit("dragEnd", dragValue.value);
 };
+/** Cancel a labelled slider drag without committing a seek. */
+const onPointerCancel = (): void => {
+  if (!props.label) return onPointerUp();
+  if (!isDragging.value) return;
+  isDragging.value = false;
+  dragValue.value = dragStartValue;
+  emit("change", dragStartValue);
+  emit("update:modelValue", dragStartValue);
+};
+
+/** Adjust an explicitly labelled slider with keyboard controls.
+ * @param event - Keyboard event targeting the slider.
+ */
+const onKeyDown = (event: KeyboardEvent): void => {
+  if (!props.label || props.disabled) return;
+  let value = displayValue.value;
+  if (event.key === "ArrowRight" || event.key === "ArrowUp") value += props.step;
+  else if (event.key === "ArrowLeft" || event.key === "ArrowDown") value -= props.step;
+  else if (event.key === "Home") value = props.min;
+  else if (event.key === "End") value = props.max;
+  else return;
+  event.preventDefault();
+  value = Math.max(props.min, Math.min(props.max, Number(value.toFixed(stepDecimals.value))));
+  dragValue.value = value;
+  emit("change", value);
+  emit("update:modelValue", value);
+  emit("dragEnd", value);
+};
 </script>
 
 <template>
   <div
     ref="sliderRef"
-    class="s-slider relative select-none"
+    class="s-slider relative select-none focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2"
     :class="[
       disabled ? 'opacity-40 cursor-not-allowed' : 'cursor-pointer',
       vertical ? 'flex flex-col items-center h-full' : '',
@@ -268,6 +319,15 @@ const onPointerUp = (): void => {
       '--s-slider-progress': progressPercent,
       '--s-slider-thumb-half': `${thumbSize / 2}px`,
     }"
+    :role="label ? 'slider' : undefined"
+    :tabindex="label && !disabled ? 0 : undefined"
+    :aria-label="label"
+    :aria-valuemin="label ? min : undefined"
+    :aria-valuemax="label ? max : undefined"
+    :aria-valuenow="label ? displayValue : undefined"
+    :aria-orientation="label ? (vertical ? 'vertical' : 'horizontal') : undefined"
+    :aria-disabled="label ? disabled : undefined"
+    @keydown="onKeyDown"
     @mouseenter="isHovering = true"
     @mouseleave="isHovering = false"
   >
@@ -276,16 +336,17 @@ const onPointerUp = (): void => {
       v-if="!vertical"
       ref="trackRef"
       class="s-slider-hitbox relative flex items-center"
-      :style="{ height: `${thumbSize}px` }"
+      :class="label ? 'touch-none' : ''"
+      :style="{ height: hitboxSize }"
       @pointerdown="onPointerDown"
       @pointermove="onPointerMove"
       @pointerup="onPointerUp"
-      @pointercancel="onPointerUp"
+      @pointercancel="onPointerCancel"
     >
       <div
-        class="s-slider-track absolute left-0 right-0 rounded-full"
+        class="s-slider-track absolute left-0 right-0 rounded-full transition-[height] duration-280 ease-out"
         :class="cover ? 'bg-cover/25' : 'bg-on-surface/12'"
-        :style="{ height: `${trackHeight}px` }"
+        :style="{ height: currentTrackSize }"
       />
       <!-- 中心刻度线（仅 centerFill 模式） -->
       <div
@@ -295,22 +356,30 @@ const onPointerUp = (): void => {
       />
       <!-- 填充：从左侧 / 中点 -->
       <div
-        class="s-slider-fill absolute rounded-full"
-        :class="cover ? 'bg-cover/100' : 'bg-primary'"
-        :style="
-          centerFill
-            ? {
-                height: `${trackHeight}px`,
-                left: centerFillStyle.start,
-                width: centerFillStyle.length,
-              }
-            : {
-                height: `${trackHeight}px`,
-                left: '0',
-                width: 'var(--s-slider-progress)',
-              }
-        "
-      />
+        class="s-slider-fill-wrapper absolute inset-0 flex items-center pointer-events-none"
+        :class="hideThumb ? 's-slider-fill-wrapper--clipped' : ''"
+      >
+        <div
+          class="s-slider-fill absolute rounded-full"
+          :class="cover ? 'bg-cover/100' : 'bg-primary'"
+          :style="
+            centerFill
+              ? {
+                  height: currentTrackSize,
+                  left: centerFillStyle.start,
+                  width: centerFillStyle.length,
+                }
+              : {
+                  height: currentTrackSize,
+                  left: '0',
+                  width: hideThumb ? '100%' : 'var(--s-slider-progress)',
+                  clipPath: hideThumb
+                    ? 'inset(0 calc(100% - var(--s-slider-progress)) 0 0)'
+                    : undefined,
+                }
+          "
+        />
+      </div>
       <div
         class="s-slider-thumb absolute rounded-full shadow-sm transition-[transform,opacity] duration-150"
         :class="[
@@ -333,16 +402,16 @@ const onPointerUp = (): void => {
       v-else
       ref="trackRef"
       class="s-slider-hitbox relative flex justify-center h-full touch-none"
-      :style="{ width: `${thumbSize}px` }"
+      :style="{ width: hitboxSize }"
       @pointerdown="onPointerDown"
       @pointermove="onPointerMove"
       @pointerup="onPointerUp"
-      @pointercancel="onPointerUp"
+      @pointercancel="onPointerCancel"
     >
       <div
-        class="s-slider-track absolute top-0 bottom-0 rounded-full"
+        class="s-slider-track absolute top-0 bottom-0 rounded-full transition-[width] duration-280 ease-out"
         :class="cover ? 'bg-cover/25' : 'bg-on-surface/12'"
-        :style="{ width: `${trackHeight}px` }"
+        :style="{ width: currentTrackSize }"
       />
       <!-- 中心刻度线（仅 centerFill 模式） -->
       <div
@@ -352,22 +421,30 @@ const onPointerUp = (): void => {
       />
       <!-- 填充：从底部 / 中点向上 -->
       <div
-        class="s-slider-fill absolute rounded-full"
-        :class="cover ? 'bg-cover/100' : 'bg-primary'"
-        :style="
-          centerFill
-            ? {
-                width: `${trackHeight}px`,
-                bottom: centerFillStyle.start,
-                height: centerFillStyle.length,
-              }
-            : {
-                width: `${trackHeight}px`,
-                bottom: '0',
-                height: 'var(--s-slider-progress)',
-              }
-        "
-      />
+        class="s-slider-fill-wrapper absolute inset-0 flex justify-center pointer-events-none"
+        :class="hideThumb ? 's-slider-fill-wrapper--clipped' : ''"
+      >
+        <div
+          class="s-slider-fill absolute rounded-full"
+          :class="cover ? 'bg-cover/100' : 'bg-primary'"
+          :style="
+            centerFill
+              ? {
+                  width: currentTrackSize,
+                  bottom: centerFillStyle.start,
+                  height: centerFillStyle.length,
+                }
+              : {
+                  width: currentTrackSize,
+                  bottom: '0',
+                  height: hideThumb ? '100%' : 'var(--s-slider-progress)',
+                  clipPath: hideThumb
+                    ? 'inset(calc(100% - var(--s-slider-progress)) 0 0 0)'
+                    : undefined,
+                }
+          "
+        />
+      </div>
       <div
         class="s-slider-thumb absolute rounded-full shadow-sm transition-[transform,opacity] duration-150"
         :class="[
@@ -389,7 +466,7 @@ const onPointerUp = (): void => {
     <!-- 刻度标记（仅水平） -->
     <div v-if="marks && !vertical" class="relative w-full mt-1.5" :style="{ height: '18px' }">
       <span
-        v-for="(label, key) in marks"
+        v-for="(markLabel, key) in marks"
         :key="key"
         class="absolute text-xs text-on-surface-variant/50 leading-none select-none whitespace-nowrap cursor-pointer hover:text-on-surface-variant/80 transition-colors"
         :style="{
@@ -403,7 +480,7 @@ const onPointerUp = (): void => {
         }"
         @click="onMarkClick(Number(key))"
       >
-        {{ label }}
+        {{ markLabel }}
       </span>
     </div>
 
@@ -465,6 +542,13 @@ const onPointerUp = (): void => {
   transition: box-shadow 0.4s ease;
 }
 
+.s-slider-fill-wrapper--clipped .s-slider-fill {
+  transition:
+    height 280ms ease-out,
+    width 280ms ease-out,
+    box-shadow 0.4s ease;
+}
+
 .dark .s-slider-fill {
   --s-slider-glow: 1;
 }
@@ -481,6 +565,31 @@ const onPointerUp = (): void => {
   animation: s-slider-breathe 1.4s ease-in-out infinite alternate;
 }
 
+.s-slider--glow .s-slider-fill-wrapper--clipped {
+  --s-slider-glow: 0.4;
+  --s-slider-glow-color: var(--s-primary);
+  filter: drop-shadow(0 0 3px rgb(var(--s-slider-glow-color) / calc(0.8 * var(--s-slider-glow))))
+    drop-shadow(0 0 8px rgb(var(--s-slider-glow-color) / calc(0.35 * var(--s-slider-glow))));
+  animation: s-slider-clipped-breathe 1.4s ease-in-out infinite alternate;
+}
+.dark .s-slider--glow .s-slider-fill-wrapper--clipped,
+.s-slider--cover.s-slider--glow .s-slider-fill-wrapper--clipped {
+  --s-slider-glow: 1;
+}
+.s-slider--cover.s-slider--glow .s-slider-fill-wrapper--clipped {
+  --s-slider-glow-color: var(--s-cover);
+}
+@keyframes s-slider-clipped-breathe {
+  to {
+    filter: drop-shadow(0 0 4px rgb(var(--s-slider-glow-color) / calc(0.95 * var(--s-slider-glow))))
+      drop-shadow(0 0 12px rgb(var(--s-slider-glow-color) / calc(0.5 * var(--s-slider-glow))));
+  }
+}
+.s-slider--glow .s-slider-fill-wrapper--clipped .s-slider-fill {
+  box-shadow: none;
+  animation: none;
+}
+
 @keyframes s-slider-breathe {
   to {
     box-shadow:
@@ -489,12 +598,27 @@ const onPointerUp = (): void => {
   }
 }
 
+:global(html[data-reduced-motion] .s-slider-track),
+:global(html[data-reduced-motion] .s-slider-fill),
+:global(html[data-reduced-motion] .s-slider--glow .s-slider-fill-wrapper--clipped),
+.s-slider--hidden .s-slider-fill-wrapper--clipped,
 :global(html[data-reduced-motion] .s-slider--glow .s-slider-fill),
 .s-slider--hidden .s-slider-fill {
   animation: none;
 }
+:global(html[data-reduced-motion] .s-slider-track),
+:global(html[data-reduced-motion] .s-slider-fill),
+:global(html[data-reduced-motion] .s-slider-fill-wrapper--clipped .s-slider-fill) {
+  transition: none;
+}
 
 @media (prefers-reduced-motion: reduce) {
+  .s-slider-track,
+  .s-slider-fill,
+  .s-slider-fill-wrapper--clipped .s-slider-fill {
+    transition: none;
+  }
+  .s-slider--glow .s-slider-fill-wrapper--clipped,
   .s-slider--glow .s-slider-fill {
     animation: none;
   }

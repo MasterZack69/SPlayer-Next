@@ -127,7 +127,10 @@ const mountPlayer = () => {
         IconSpHeartMode: true,
         IconSpPlayOrder: true,
         LyricActions: true,
-        PlayerCover: true,
+        AmControls: true,
+        PlayerCover: { name: "PlayerCover", props: { am: Boolean }, template: "<div />" },
+        IconSpAmLyrics: true,
+        IconSpAmLyricsActive: true,
         PlayerData: true,
         PlaylistPickerDialog: true,
         QueuePanel: true,
@@ -212,6 +215,36 @@ describe("Now Playing initialization", () => {
     await normal!.trigger("click");
     expect(playerSettings.player.coverLayout).toBe("default");
     expect(wrapper.findComponent({ name: "PlayerCover" }).exists()).toBe(true);
+  });
+
+  it("switches to AM and freezes lyrics while its queue or lyric toggle is hidden", async () => {
+    const { status } = mountPlayer();
+    status.isPlayerExpanded = true;
+    await vi.advanceTimersByTimeAsync(100);
+    wrapper.findComponent(Lyrics).vm.$emit("ready");
+    await nextTick();
+    const am = wrapper
+      .findAll("button")
+      .find((button) => button.text() === "settings.coverLayout.am");
+    await am!.trigger("click");
+    expect(playerSettings.player.coverLayout).toBe("am");
+    expect(wrapper.findComponent({ name: "AmControls" }).exists()).toBe(true);
+    expect(wrapper.findComponent({ name: "PlayerCover" }).props("am")).toBe(true);
+    status.showLyric = false;
+    playbackMocks.stop.mockClear();
+    await nextTick();
+    expect(playbackMocks.stop).toHaveBeenCalled();
+    status.showLyric = true;
+    playbackMocks.start.mockClear();
+    await nextTick();
+    expect(playbackMocks.start).toHaveBeenCalled();
+    status.fullQueueOpen = true;
+    playbackMocks.stop.mockClear();
+    await nextTick();
+    expect(playbackMocks.stop).toHaveBeenCalled();
+    status.isPlayerExpanded = false;
+    await vi.advanceTimersByTimeAsync(100);
+    expect(wrapper.findComponent({ name: "AmControls" }).exists()).toBe(false);
   });
 
   it("always uses normal lyric blending even if a legacy preference is present", async () => {

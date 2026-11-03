@@ -484,6 +484,16 @@
     }
   },
   "player": {
+    "am": {
+      "trackDetails": "Track details",
+      "favorite": "Toggle favorite",
+      "addToPlaylist": "Add to playlist",
+      "seek": "Playback position",
+      "timeFormat": "Change time display",
+      "volume": "Volume",
+      "collapse": "Collapse player",
+      "lyrics": "Toggle lyrics"
+    },
     "noOtherTracks": "No other songs in queue",
     "prev": "Previous",
     "next": "Next",
@@ -1286,7 +1296,8 @@
       "description": "Cover presentation in the full-screen player",
       "default": "Default",
       "fullscreen": "Fullscreen",
-      "lyrics": "Fullscreen Lyrics"
+      "lyrics": "Fullscreen Lyrics",
+      "am": "AM Style"
     },
     "coverLyricRatio": {
       "label": "Cover/Lyrics Ratio",

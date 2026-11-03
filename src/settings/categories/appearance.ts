@@ -337,6 +337,7 @@ const appearanceCategory: SettingCategory = {
             { value: "default", labelKey: "settings.coverLayout.default" },
             { value: "fullscreen", labelKey: "settings.coverLayout.fullscreen" },
             { value: "lyrics", labelKey: "settings.coverLayout.lyrics" },
+            { value: "am", labelKey: "settings.coverLayout.am" },
           ],
           defaultValue: "default",
         },

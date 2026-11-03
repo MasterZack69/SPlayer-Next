@@ -356,7 +356,7 @@ export const useSettingsStore = defineStore(
         };
         if (!["lyric", "translation", "word"].includes(player.barLyricMode))
           player.barLyricMode = "translation";
-        if (!["default", "fullscreen", "lyrics"].includes(player.coverLayout))
+        if (!["default", "fullscreen", "lyrics", "am"].includes(player.coverLayout))
           player.coverLayout = "default";
         if (typeof lyric.autoGenerateWordByWord !== "boolean") lyric.autoGenerateWordByWord = false;
         if (player.transitionMode !== "crossfade") player.transitionMode = "none";

@@ -40,7 +40,7 @@ The X button and system window-close actions such as **Alt+F4** use the same clo
 
 With only one song in the queue, **Previous** returns to the beginning without changing whether playback is paused. **Next** leaves playback unchanged and displays a notice that there are no other tracks.
 
-Open **Now Playing** for the full player. Use the layout button in its top bar, or **Settings → Appearance → Cover Layout**, to choose the default, fullscreen cover, or fullscreen lyrics layout. Lyrics use AMLL; there is no engine selector. Local sidecar files, embedded lyrics, and lyrics supplied by your configured server are supported. See [Lyrics](lyrics.md).
+Open **Now Playing** for the full player. Use the layout button in its top bar, or **Settings → Appearance → Cover Layout**, to choose the default, fullscreen cover, fullscreen lyrics, or AM-style layout. Lyrics use AMLL; there is no engine selector. Local sidecar files, embedded lyrics, and lyrics supplied by your configured server are supported. See [Lyrics](lyrics.md).
 
 The **Fluid** background starts initializing during player entry rather than first showing a blurred-cover background. Initial rendering still depends on cover decoding and GPU availability.
 
