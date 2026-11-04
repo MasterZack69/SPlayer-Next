@@ -28,6 +28,7 @@ Same as upstream: LRC, eLRC, KRC, QRC, TTML
 - Plugin initialization, plugin playback/lyric/cover fallbacks, and plugin settings
 - Download UI/service startup, music recognition, external API servers, and AI/MCP integration
 - Windows and MacOS compatibility
+- AutoMix
 
 ## Contributing
 
