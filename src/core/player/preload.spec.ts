@@ -108,6 +108,27 @@ vi.mock("@/utils/errors", () => ({
 vi.mock("@/utils/preset/skipKeywords", () => ({ shouldSkipKeywordTrack: () => false }));
 vi.mock("@/i18n", () => ({ default: { global: { t: (value: string) => value } } }));
 
+describe("external mode synchronization", () => {
+  it("echoes unchanged or locked modes without changing the queue", async () => {
+    vi.resetModules();
+    const sync = vi.fn();
+    Object.assign(window, { api: { player: { syncPlayMode: sync } } });
+    Object.assign(mocks.status, { repeatMode: "list", shuffleMode: "off", heartMode: false });
+    const { setRepeatMode, setShuffleMode } = await import("./index");
+    setRepeatMode("list", true);
+    setShuffleMode("off", true);
+    Object.assign(mocks.status, { heartMode: true });
+    setShuffleMode("on", true);
+    expect(sync.mock.calls).toEqual([
+      ["list", "off"],
+      ["list", "off"],
+      ["list", "off"],
+    ]);
+    expect(mocks.status.shuffleMode).toBe("off");
+    Object.assign(mocks.status, { heartMode: false });
+  });
+});
+
 describe("切歌消费真实预载", () => {
   beforeEach(() => {
     vi.resetModules();

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { useMediaStore } from "@/stores/media";
 import { useStatusStore } from "@/stores/status";
+import CrossfadeCover from "./CrossfadeCover.vue";
 
 withDefaults(defineProps<{ fullscreen?: boolean; am?: boolean }>(), {
   fullscreen: false,
@@ -10,26 +11,40 @@ withDefaults(defineProps<{ fullscreen?: boolean; am?: boolean }>(), {
 const media = useMediaStore();
 const status = useStatusStore();
 const { isPlaying } = storeToRefs(status);
+const visibility = useDocumentVisibility();
 
 /** 加载中的歌曲使用队列当前项作为封面兜底。 */
 const displayTrack = computed(() => media.track ?? status.currentTrack);
+const coverIdentity = computed(() =>
+  JSON.stringify([
+    displayTrack.value?.source,
+    displayTrack.value?.serverId,
+    displayTrack.value?.id,
+  ]),
+);
 
-/** 高清封面缓存 */
-const hdCache = shallowRef<{ id: string; data: string } | null>(null);
+/** Cache at most one full-resolution local cover. */
+const hdCache = shallowRef<{ identity: string; data: string } | null>(null);
 
 const coverSrc = computed(() =>
-  hdCache.value && hdCache.value.id === displayTrack.value?.id
+  hdCache.value && hdCache.value.identity === coverIdentity.value
     ? hdCache.value.data
     : displayTrack.value?.coverOriginal || displayTrack.value?.cover,
 );
 
-watchEffect(async () => {
-  const id = displayTrack.value?.id;
-  if (!status.isPlayerExpanded || status.trackLoading || !id) return;
-  if (displayTrack.value?.source !== "local" || hdCache.value?.id === id) return;
+watchEffect(async (onCleanup) => {
+  const identity = coverIdentity.value;
+  const track = displayTrack.value;
+  if (hdCache.value && hdCache.value.identity !== identity) hdCache.value = null;
+  if (!status.isPlayerExpanded || status.trackLoading || !track?.id) return;
+  if (track.source !== "local" || hdCache.value?.identity === identity) return;
+  let canceled = false;
+  onCleanup(() => {
+    canceled = true;
+  });
   const r = await window.api.player.getCoverRaw();
-  if (displayTrack.value?.id !== id || !r.success || !r.data) return;
-  hdCache.value = { id, data: r.data };
+  if (canceled || coverIdentity.value !== identity || !r.success || !r.data) return;
+  hdCache.value = { identity, data: r.data };
 });
 </script>
 
@@ -49,7 +64,14 @@ watchEffect(async () => {
             ]
     "
   >
-    <DetailCover :src="coverSrc" :fallback="displayTrack?.cover" class="size-full" />
+    <CrossfadeCover
+      v-if="am || fullscreen"
+      :identity="coverIdentity"
+      :src="coverSrc"
+      :fallback="displayTrack?.cover"
+      :active="status.isPlayerExpanded && visibility === 'visible'"
+    />
+    <DetailCover v-else :src="coverSrc" :fallback="displayTrack?.cover" class="size-full" />
   </div>
 </template>
 

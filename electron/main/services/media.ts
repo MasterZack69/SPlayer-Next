@@ -2,7 +2,13 @@ import { loadNativeModule } from "@main/utils/nativeLoader";
 import { mediaLog, nativeLogsDir } from "@main/utils/logger";
 import { isDev } from "@main/utils/config";
 import { store } from "@main/store";
-import type { MediaEvent, MetadataParam, PlayStateParam, TimelineParam } from "@splayer/media-ctrl";
+import type {
+  MediaEvent,
+  MetadataParam,
+  PlayModeParam,
+  PlayStateParam,
+  TimelineParam,
+} from "@splayer/media-ctrl";
 
 export type { MediaEvent, MetadataParam, PlayStateParam, TimelineParam };
 
@@ -64,6 +70,9 @@ export const setMetadata = (param: MetadataParam): void => safeCall(() => mc?.se
 /** 更新播放状态 */
 export const setPlayState = (param: PlayStateParam): void =>
   safeCall(() => mc?.setPlayState(param));
+
+/** Publish the effective shuffle and repeat modes to MPRIS. */
+export const setPlayMode = (param: PlayModeParam): void => safeCall(() => mc?.setPlayMode(param));
 
 /** 更新播放进度 */
 export const setTimeline = (param: TimelineParam): void => safeCall(() => mc?.setTimeline(param));

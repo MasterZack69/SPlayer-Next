@@ -11,8 +11,8 @@ pub enum MediaEventType {
     Stop,
     NextTrack,
     PrevTrack,
-    ToggleShuffle,
-    ToggleRepeat,
+    SetShuffle,
+    SetRepeat,
     SetRate,
     SetVolume,
     /// 绝对位置（毫秒）
@@ -26,39 +26,55 @@ pub struct MediaEvent {
     pub position_ms: Option<f64>,
     pub rate: Option<f64>,
     pub volume: Option<f64>,
+    pub shuffle: Option<bool>,
+    pub repeat: Option<RepeatMode>,
 }
 
 impl MediaEvent {
+    /// Create an event without an additional value.
     pub const fn new(t: MediaEventType) -> Self {
         Self {
             type_: t,
             position_ms: None,
             rate: None,
             volume: None,
+            shuffle: None,
+            repeat: None,
         }
     }
+    /// Create an absolute seek request in milliseconds.
     pub const fn seek(pos: f64) -> Self {
         Self {
-            type_: MediaEventType::Seek,
             position_ms: Some(pos),
-            rate: None,
-            volume: None,
+            ..Self::new(MediaEventType::Seek)
         }
     }
+    /// Create a playback-rate request.
     pub const fn set_rate(rate: f64) -> Self {
         Self {
-            type_: MediaEventType::SetRate,
-            position_ms: None,
             rate: Some(rate),
-            volume: None,
+            ..Self::new(MediaEventType::SetRate)
         }
     }
+    /// Create a volume request.
     pub const fn set_volume(volume: f64) -> Self {
         Self {
-            type_: MediaEventType::SetVolume,
-            position_ms: None,
-            rate: None,
             volume: Some(volume),
+            ..Self::new(MediaEventType::SetVolume)
+        }
+    }
+    /// Create an explicit shuffle request.
+    pub const fn set_shuffle(shuffle: bool) -> Self {
+        Self {
+            shuffle: Some(shuffle),
+            ..Self::new(MediaEventType::SetShuffle)
+        }
+    }
+    /// Create an explicit repeat request.
+    pub const fn set_repeat(repeat: RepeatMode) -> Self {
+        Self {
+            repeat: Some(repeat),
+            ..Self::new(MediaEventType::SetRepeat)
         }
     }
 }
@@ -159,4 +175,23 @@ pub struct TimelineParam {
 pub struct PlayModeParam {
     pub shuffle: bool,
     pub repeat: RepeatMode,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{MediaEvent, MediaEventType, RepeatMode};
+
+    #[test]
+    fn mode_events_preserve_explicit_values() {
+        let shuffle = MediaEvent::set_shuffle(false);
+        assert_eq!(shuffle.type_, MediaEventType::SetShuffle);
+        assert_eq!(shuffle.shuffle, Some(false));
+        assert_eq!(shuffle.repeat, None);
+        for mode in [RepeatMode::None, RepeatMode::Track, RepeatMode::List] {
+            let repeat = MediaEvent::set_repeat(mode);
+            assert_eq!(repeat.type_, MediaEventType::SetRepeat);
+            assert_eq!(repeat.repeat, Some(mode));
+            assert_eq!(repeat.shuffle, None);
+        }
+    }
 }

@@ -11,6 +11,10 @@ const mocks = vi.hoisted(() => ({
   powerEvents: new Map<string, () => void>(),
   appEvents: new Map<string, Array<() => void>>(),
   handlers: new Map<string, (...args: unknown[]) => unknown>(),
+  listeners: new Map<string, (...args: unknown[]) => unknown>(),
+  mode: vi.fn(),
+  trayMode: vi.fn(),
+  send: vi.fn(),
   reset: [] as Array<() => void>,
   transition: vi.fn(),
   load: vi.fn(),
@@ -22,7 +26,12 @@ const mocks = vi.hoisted(() => ({
   streamingPrepare: vi.fn(),
   streamingStart: vi.fn(),
   streamingStop: vi.fn(),
-  mediaEvent: (_event: { type: string; positionMs?: number }) => {},
+  mediaEvent: (_event: {
+    type: string;
+    positionMs?: number;
+    shuffle?: boolean;
+    repeat?: string;
+  }) => {},
   scrobbleRestart: vi.fn(),
   lastfmRestart: vi.fn(),
 }));
@@ -30,7 +39,8 @@ vi.mock("electron", () => ({
   ipcMain: {
     handle: (name: string, callback: (...args: unknown[]) => unknown) =>
       mocks.handlers.set(name, callback),
-    on: vi.fn(),
+    on: (name: string, callback: (...args: unknown[]) => unknown) =>
+      mocks.listeners.set(name, callback),
   },
   powerMonitor: {
     on: (name: string, callback: () => void) => mocks.powerEvents.set(name, callback),
@@ -77,6 +87,7 @@ vi.mock("@main/utils/logger", () => ({
 }));
 vi.mock("@main/services/media", () => ({
   setMetadata: mocks.metadata,
+  setPlayMode: mocks.mode,
   setPlayState: vi.fn(),
   setTimeline: vi.fn(),
   onEvent: (callback: typeof mocks.mediaEvent) => {
@@ -93,7 +104,7 @@ vi.mock("@main/services/device", () => ({
   startDeviceMonitoring: vi.fn(),
   stopDeviceMonitoring: vi.fn(),
 }));
-vi.mock("@main/utils/broadcast", () => ({ sendToMain: vi.fn() }));
+vi.mock("@main/utils/broadcast", () => ({ sendToMain: mocks.send }));
 vi.mock("@main/server/broadcast", () => ({ wsBroadcast: vi.fn() }));
 vi.mock("@main/utils/encoding", () => ({}));
 vi.mock("@main/utils/protocol", () => ({ toCacheUrl: () => undefined }));
@@ -121,7 +132,11 @@ vi.mock("@main/services/streaming/adapters/resolve", () => ({
   invalidateStreamingSession: vi.fn(),
 }));
 vi.mock("@main/services/thumbar", () => ({ getThumbar: () => null }));
-vi.mock("@main/services/tray", () => ({ setTraySongName: vi.fn(), setTrayPlayState: vi.fn() }));
+vi.mock("@main/services/tray", () => ({
+  setTraySongName: vi.fn(),
+  setTrayPlayState: vi.fn(),
+  setTrayPlayMode: mocks.trayMode,
+}));
 vi.mock("@main/services/thumbnail", () => ({ setTaskbarThumbnailCover: vi.fn() }));
 vi.mock("@main/window", () => ({ getMainWindow: () => null }));
 vi.mock("@main/store", () => ({ store: { get: () => false } }));
@@ -138,6 +153,26 @@ const options = { meta: { id: "next", title: "Next", source: "local", artists: [
 const invoke = (name: string, ...args: unknown[]) => mocks.handlers.get(name)!(null, ...args);
 
 describe("交接响应的主进程竞态保护", () => {
+  it("routes explicit MPRIS mode requests and publishes renderer state", () => {
+    mocks.mediaEvent({ type: "SetShuffle", shuffle: true });
+    mocks.mediaEvent({ type: "SetShuffle", shuffle: false });
+    mocks.mediaEvent({ type: "SetRepeat", repeat: "Track" });
+    mocks.mediaEvent({ type: "SetRepeat", repeat: "None" });
+    mocks.mediaEvent({ type: "SetRepeat", repeat: "None" });
+    expect(mocks.send.mock.calls).toEqual([
+      ["player:event", { type: "setShuffle", data: { mode: "on" } }],
+      ["player:event", { type: "setShuffle", data: { mode: "off" } }],
+      ["player:event", { type: "setRepeat", data: { mode: "one" } }],
+      ["player:event", { type: "setRepeat", data: { mode: "list" } }],
+      ["player:event", { type: "setRepeat", data: { mode: "list" } }],
+    ]);
+    mocks.listeners.get("player:syncPlayMode")!(null, "one", "on");
+    expect(mocks.mode).toHaveBeenCalledWith({ shuffle: true, repeat: "Track" });
+    expect(mocks.trayMode).toHaveBeenCalledWith("one", "on");
+    mocks.listeners.get("player:syncPlayMode")!(null, "list", "off");
+    expect(mocks.mode).toHaveBeenLastCalledWith({ shuffle: false, repeat: "List" });
+  });
+
   it("单曲重播仅重置保留的 Last.fm 统计轮次", async () => {
     expect(await invoke("player:seek", 0, true)).toEqual({ success: true });
     expect(mocks.scrobbleRestart).not.toHaveBeenCalled();
@@ -153,6 +188,7 @@ describe("交接响应的主进程竞态保护", () => {
     vi.resetModules();
     vi.clearAllMocks();
     mocks.handlers.clear();
+    mocks.listeners.clear();
     mocks.reset.length = 0;
     mocks.created.length = 0;
     mocks.powerEvents.clear();

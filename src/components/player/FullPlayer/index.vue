@@ -190,12 +190,13 @@ const selectLayout = (layout: CoverLayout): void => {
 };
 const coverWidth = computed(() => `${settings.player.coverLyricRatio * 100}%`);
 
-const coverCentered = computed(() => {
-  if (fullscreenCover.value || fullscreenLyrics.value || status.fullQueueOpen) return false;
+const centeredWithoutQueue = computed(() => {
+  if (fullscreenCover.value || fullscreenLyrics.value) return false;
   return (
     !showLyric.value || ((amLayout.value || settings.player.autoCenterCover) && !hasLyric.value)
   );
 });
+const coverCentered = computed(() => centeredWithoutQueue.value && !status.fullQueueOpen);
 
 const handleLyricSeek = async (timeMs: number): Promise<void> => {
   await player.seek(timeMs);
@@ -310,6 +311,7 @@ const toggleLyric = (): void => {
         style="--lp-color: rgb(var(--s-cover))"
         @mouseenter="onPlayerMouseEnter"
         @mouseleave="onPlayerMouseLeave"
+        @mousemove="onMainMove"
       >
         <!-- Prepare the background during entry; only the spectrum waits for after-enter. -->
         <PlayerBackground :visible="playerVisible" :active="playerVisible" />
@@ -420,11 +422,7 @@ const toggleLyric = (): void => {
           </SButton>
         </div>
         <!-- 主区域 -->
-        <div
-          class="absolute top-14 inset-x-0 bottom-20"
-          :class="amLayout ? 'am-main' : ''"
-          @mousemove="onMainMove"
-        >
+        <div class="absolute top-14 inset-x-0 bottom-20" :class="amLayout ? 'am-main' : ''">
           <div
             v-if="amLayout"
             class="am-left absolute inset-y-0 left-0 w-[45%] flex items-center justify-center transition-transform duration-500"
@@ -540,7 +538,7 @@ const toggleLyric = (): void => {
             }"
           >
             <Transition
-              enter-active-class="transition-opacity duration-600 ease-[cubic-bezier(0.4,0,0.2,1)]"
+              :enter-active-class="`transition-opacity duration-600 ease-[cubic-bezier(0.4,0,0.2,1)] ${centeredWithoutQueue ? 'queue-enter-delayed' : ''}`"
               enter-from-class="opacity-0"
               leave-active-class="transition-opacity duration-600 ease-[cubic-bezier(0.4,0,0.2,1)]"
               leave-to-class="opacity-0"
@@ -726,6 +724,19 @@ const toggleLyric = (): void => {
 </template>
 
 <style scoped>
+@media (min-width: 701px) {
+  .queue-enter-delayed {
+    transition-delay: 300ms;
+  }
+}
+:global(html[data-reduced-motion] .queue-enter-delayed) {
+  transition-delay: 0ms;
+}
+@media (prefers-reduced-motion: reduce) {
+  .queue-enter-delayed {
+    transition-delay: 0ms;
+  }
+}
 .am-left {
   overflow-y: auto;
 }

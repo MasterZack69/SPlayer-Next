@@ -1106,12 +1106,16 @@ const syncPlayMode = (): void => {
 };
 
 /**
- * 设置循环模式
- * @param mode - list（列表循环）、one（单曲循环）
+ * Set the repeat mode.
+ * @param mode - Repeat the list or the current track.
+ * @param resync - Publish the effective mode even when unchanged.
  */
-export const setRepeatMode = (mode: RepeatMode): void => {
+export const setRepeatMode = (mode: RepeatMode, resync = false): void => {
   const status = useStatusStore();
-  if (status.repeatMode === mode) return;
+  if (status.repeatMode === mode) {
+    if (resync) syncPlayMode();
+    return;
+  }
   status.repeatMode = mode;
   syncPlayMode();
   toast.info(i18n.global.t(`player.repeatMode.${mode}`), { icon: false });
@@ -1132,14 +1136,16 @@ export const toggleShuffleMode = (): void => {
 };
 
 /**
- * 设置随机模式，开启时洗牌队列，关闭时恢复原始顺序
- * @param mode - off（顺序）、on（随机）
+ * Set shuffle, preserving the current track and original queue order.
+ * @param mode - Whether shuffle is on or off.
+ * @param resync - Publish the effective mode even when unchanged or locked.
  */
-export const setShuffleMode = (mode: ShuffleMode): void => {
+export const setShuffleMode = (mode: ShuffleMode, resync = false): void => {
   const status = useStatusStore();
-  // 心动模式下忽略
-  if (status.heartMode) return;
-  if (status.shuffleMode === mode) return;
+  if (status.heartMode || status.shuffleMode === mode) {
+    if (resync) syncPlayMode();
+    return;
+  }
   status.shuffleMode = mode;
   if (mode === "on") {
     // 洗牌，当前歌置顶

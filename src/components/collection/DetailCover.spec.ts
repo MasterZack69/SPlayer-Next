@@ -6,6 +6,22 @@ import defaultFallback from "@/assets/images/song.jpg";
 afterEach(() => vi.restoreAllMocks());
 
 describe("decoded detail artwork", () => {
+  it("only decodes and reports fallback readiness when requested", async () => {
+    const decode = vi.spyOn(HTMLImageElement.prototype, "decode").mockResolvedValue();
+    const ordinary = mount(DetailCover, { props: { fallback: "thumb.jpg" } });
+    await ordinary.get('img[src="thumb.jpg"]').trigger("load");
+    await flushPromises();
+    expect(decode).not.toHaveBeenCalled();
+    expect(ordinary.emitted("ready")).toBeUndefined();
+    ordinary.unmount();
+    const layered = mount(DetailCover, { props: { fallback: "thumb.jpg", reportReady: true } });
+    await layered.get('img[src="thumb.jpg"]').trigger("load");
+    await flushPromises();
+    expect(decode).toHaveBeenCalledOnce();
+    expect(layered.emitted("ready")).toHaveLength(1);
+    layered.unmount();
+  });
+
   it("keeps the thumbnail until the full cover has decoded", async () => {
     const decoded = Promise.withResolvers<void>();
     vi.spyOn(HTMLImageElement.prototype, "decode").mockReturnValue(decoded.promise);

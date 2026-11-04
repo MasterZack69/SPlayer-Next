@@ -12,6 +12,10 @@ Lyrics come from local sidecar files, embedded audio metadata, or the configured
 
 **Settings → Lyrics → Auto-generate Word Effect** is off by default. When enabled, it estimates timing across visible graphemes for eligible line-timed lyrics; this is an approximation, not actual word timing. Existing word timings are retained. Turning it off reparses the original lyrics.
 
+## Exporting a lyric image
+
+Choose **Export image** in the Copy Lyrics dialog to select a save location and filename. The save dialog opens in Downloads by default; canceling it does not save a file.
+
 ## Local files and TTML
 
 Keep a sidecar lyric file with its matching audio file, using the same base filename, for example `Song.flac` and `Song.lrc` or `Song.ttml`. The local loader chooses a recognized sidecar according to the lyric-format priority, then falls back to embedded lyrics if necessary.

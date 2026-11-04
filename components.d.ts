@@ -46,6 +46,7 @@ declare module 'vue' {
     CopyLyricsDialog: typeof import('./src/components/modals/CopyLyricsDialog.vue')['default']
     CoverCard: typeof import('./src/components/list/CoverCard.vue')['default']
     CoverList: typeof import('./src/components/list/CoverList.vue')['default']
+    CrossfadeCover: typeof import('./src/components/player/FullPlayer/CrossfadeCover.vue')['default']
     DetailCover: typeof import('./src/components/collection/DetailCover.vue')['default']
     DeviceSelector: typeof import('./src/components/settings/custom/DeviceSelector.vue')['default']
     DialogClose: typeof import('reka-ui')['DialogClose']

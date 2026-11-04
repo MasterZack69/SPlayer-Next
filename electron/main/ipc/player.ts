@@ -12,6 +12,7 @@ import { readFileAutoEncoding } from "@main/utils/encoding";
 import { toCacheUrl } from "@main/utils/protocol";
 import { toMs } from "@main/utils/time";
 import * as mediaService from "@main/services/media";
+import { playerControl } from "@main/services/playerControl";
 import * as nowPlaying from "@main/services/nowPlaying";
 import * as lastfm from "@main/services/lastfm";
 import * as streamingPlayback from "@main/services/streaming/playback";
@@ -909,9 +910,13 @@ export const registerPlayerIpc = (): void => {
     }
   });
 
-  // 渲染进程同步播放模式到托盘
+  // Publish renderer playback modes to the tray and Linux media controls.
   ipcMain.on("player:syncPlayMode", (_event, repeat: RepeatMode, shuffle: ShuffleMode) => {
     setTrayPlayMode(repeat, shuffle);
+    mediaService.setPlayMode({
+      shuffle: shuffle === "on",
+      repeat: repeat === "one" ? "Track" : "List",
+    });
   });
 
   // 渲染进程同步当前歌曲喜欢状态到托盘与缩略图工具栏
@@ -927,6 +932,17 @@ export const registerPlayerIpc = (): void => {
   // 系统媒体事件处理
   mediaService.onEvent((event: MediaEvent) => {
     try {
+      // Mode changes belong to the renderer queue and need no audio engine initialization.
+      if (event.type === "SetShuffle") {
+        if (event.shuffle != null) playerControl.setShuffle(event.shuffle ? "on" : "off");
+        return;
+      }
+      if (event.type === "SetRepeat") {
+        // This player has no repeat-off mode. Use repeat-all deterministically.
+        if (event.repeat != null)
+          playerControl.setRepeat(event.repeat === "Track" ? "one" : "list");
+        return;
+      }
       const inst = getPlayer();
       switch (event.type) {
         case "Play":

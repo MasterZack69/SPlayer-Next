@@ -54,7 +54,8 @@ declare global {
         saveFile: (
           data: ArrayBuffer,
           fileName: string,
-        ) => Promise<{ success: boolean; path?: string; error?: string }>;
+          title?: string,
+        ) => Promise<{ success: boolean; path?: string; error?: string; canceled?: boolean }>;
         relaunch: () => Promise<void>;
         onProtocolUrl: (callback: (url: string) => void) => () => void;
         consumePendingProtocolUrl: () => Promise<string | null>;

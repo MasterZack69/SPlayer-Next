@@ -203,9 +203,9 @@ const api = {
     listFonts: () => ipcRenderer.invoke("system:listFonts"),
     // 拉远端字节回渲染层
     fetchRemoteBytes: (url: string) => ipcRenderer.invoke("system:fetchRemoteBytes", url),
-    // 保存文件到下载目录
-    saveFile: (data: ArrayBuffer, defaultName: string) =>
-      ipcRenderer.invoke("system:saveFile", data, defaultName),
+    // Save a file to a user-selected destination.
+    saveFile: (data: ArrayBuffer, defaultName: string, title?: string) =>
+      ipcRenderer.invoke("system:saveFile", data, defaultName, title),
     // 重启应用
     relaunch: () => ipcRenderer.invoke("system:relaunch"),
     // 测试当前网络代理

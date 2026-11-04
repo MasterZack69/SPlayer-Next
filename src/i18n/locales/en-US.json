@@ -537,7 +537,8 @@
       "copy": "Copy",
       "copyRaw": "Copy original",
       "exportImage": "Export image",
-      "saved": "Saved to Downloads",
+      "saved": "Image saved",
+      "saveDialogTitle": "Save lyric image",
       "fileSuffix": "Lyrics",
       "exportFailed": "Failed to export image",
       "empty": "Nothing to copy"

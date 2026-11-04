@@ -8,6 +8,13 @@ import { getValidArtists } from "@shared/utils/track";
 import { getQualityLabel, isLosslessQuality } from "@/utils/quality";
 import { volumeGainToPosition, volumePositionToGain } from "@/utils/volume";
 import * as player from "@/core/player";
+import type { Artist } from "@shared/types/player";
+import {
+  canNavigateToResource,
+  navigateToResource,
+  type ResourceNavigationTarget,
+} from "@/utils/navigate";
+import { setPlayerExpanded } from "@/services/playerTransition";
 
 const emit = defineEmits<{ addToPlaylist: [] }>();
 const { t } = useI18n();
@@ -17,12 +24,28 @@ const fav = useFavorite();
 const { timeDisplay, toggleTimeFormat } = useTimeFormat();
 const { snapToNearestLyric } = useProgressLyric();
 const track = computed(() => media.track ?? status.currentTrack);
-const artists = computed(
-  () =>
-    getValidArtists(track.value?.artists)
-      .map((artist) => artist.name)
-      .join(", ") || t("playlist.unknownArtist"),
-);
+const artists = computed(() => getValidArtists(track.value?.artists));
+
+/**
+ * Build the same source-aware artist destination used by track details.
+ * @param artist - Artist from the displayed track.
+ * @returns A destination including its source and server identity.
+ */
+const artistTarget = (artist: Artist): ResourceNavigationTarget => ({
+  type: "artist",
+  source: track.value?.source,
+  serverId: track.value?.serverId,
+  id: artist.id,
+  name: artist.name,
+});
+
+/**
+ * Open the artist and collapse the player only when navigation succeeds.
+ * @param artist - Artist from the displayed track.
+ */
+const openArtist = (artist: Artist): void => {
+  if (navigateToResource(artistTarget(artist))) setPlayerExpanded(false);
+};
 const quality = computed(() => media.detail?.quality ?? track.value?.quality);
 const volume = computed(() => volumeGainToPosition(status.volume));
 
@@ -54,11 +77,27 @@ const setVolume = (value: number): void => {
               <SMarquee fit class="max-w-full font-semibold text-[clamp(14px,2vh,22px)]">
                 {{ track?.title }}
               </SMarquee>
-              <div class="truncate text-cover/50 text-[clamp(12px,1.7vh,17px)]">{{ artists }}</div>
             </button>
           </template>
           <div class="w-[min(80vw,320px)]"><PlayerData align="left" /></div>
         </SPopover>
+        <div class="truncate text-cover/50 text-[clamp(12px,1.7vh,17px)]">
+          <template v-if="artists.length">
+            <template v-for="(artist, index) in artists" :key="`${artist.id}-${index}`">
+              <span v-if="index">{{ ", " }}</span>
+              <button
+                v-if="canNavigateToResource(artistTarget(artist))"
+                type="button"
+                class="border-none bg-transparent p-0 text-inherit cursor-pointer hover:underline focus-visible:outline focus-visible:outline-2"
+                @click="openArtist(artist)"
+              >
+                {{ artist.name }}
+              </button>
+              <span v-else>{{ artist.name }}</span>
+            </template>
+          </template>
+          <span v-else>{{ t("playlist.unknownArtist") }}</span>
+        </div>
       </div>
       <SButton
         type="cover"
@@ -104,7 +143,7 @@ const setVolume = (value: number): void => {
         @drag-end="seek"
       />
       <div
-        class="mt-1 grid grid-cols-[1fr_auto_1fr] items-center text-xs tabular-nums text-cover/55"
+        class="mt-1 min-h-[1.5em] grid grid-cols-[1fr_auto_1fr] items-center text-xs tabular-nums text-cover/55"
       >
         <button
           type="button"

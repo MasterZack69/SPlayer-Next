@@ -2,13 +2,15 @@
 import type { SImgProps } from "@/components/ui/SImg.vue";
 import defaultFallback from "@/assets/images/song.jpg";
 
-const props = withDefaults(defineProps<SImgProps>(), {
+const props = withDefaults(defineProps<SImgProps & { reportReady?: boolean }>(), {
   fallback: defaultFallback,
   alt: "",
 });
 
+const emit = defineEmits<{ ready: [] }>();
 const loaded = ref(false);
 const imageRef = shallowRef<HTMLImageElement>();
+const fallbackRef = shallowRef<HTMLImageElement>();
 /** Keep the built-in placeholder available if the thumbnail also fails. */
 const fallbackSrc = ref(props.fallback || defaultFallback);
 
@@ -37,7 +39,30 @@ const handleLoad = async (event: Event): Promise<void> => {
   } catch {
     return;
   }
-  if (imageRef.value === image && image.getAttribute("src") === props.src) loaded.value = true;
+  if (imageRef.value === image && image.getAttribute("src") === props.src) {
+    loaded.value = true;
+    if (props.reportReady) emit("ready");
+  }
+};
+
+/**
+ * Report a decoded fallback only while it is still the displayed thumbnail.
+ * @param event - Native thumbnail load event.
+ */
+const handleFallbackLoad = async (event: Event): Promise<void> => {
+  if (!props.reportReady) return;
+  const image = event.target as HTMLImageElement;
+  try {
+    await image.decode();
+  } catch {
+    return;
+  }
+  if (
+    fallbackRef.value === image &&
+    !loaded.value &&
+    image.getAttribute("src") === fallbackSrc.value
+  )
+    emit("ready");
 };
 
 /** Replace a failed thumbnail with the built-in placeholder. */
@@ -50,10 +75,12 @@ const handleFallbackError = (): void => {
   <div class="relative isolate overflow-hidden">
     <img
       v-if="!loaded"
+      ref="fallbackRef"
       :src="fallbackSrc"
       :alt="alt"
       class="absolute inset-0 size-full object-cover"
       decoding="async"
+      @load="handleFallbackLoad"
       @error="handleFallbackError"
     />
     <img

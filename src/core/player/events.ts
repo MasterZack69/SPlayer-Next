@@ -158,10 +158,10 @@ export const handleEvent = async (event: PlayerEvent): Promise<void> => {
       await prevTrack();
       break;
     case "setShuffle":
-      setShuffleMode(event.data.mode);
+      setShuffleMode(event.data.mode, true);
       break;
     case "setRepeat":
-      setRepeatMode(event.data.mode);
+      setRepeatMode(event.data.mode, true);
       break;
     case "addToQueue":
       insertManyToQueue(event.data.tracks, event.data.position);
