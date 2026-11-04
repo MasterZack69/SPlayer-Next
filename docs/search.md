@@ -10,9 +10,9 @@ Clearing the field with **X** clears the query and its results. Search remains s
 
 ## Page-scoped search
 
-On Library, Artists, Albums, Genres, Folders, Liked Songs, and collection pages, the top field filters that page's relevant content. For example, an albums page filters albums, while an album detail page filters its songs. It does not replace the current page with global results.
+On Songs, Artists, Albums, Genres, Folders, Liked Songs, and collection pages, the top field filters that page's relevant content. For example, an albums page filters albums, while an album detail page filters its songs. It does not replace the current page with global results.
 
-The extra local Library search bar has been removed. Clear the top field to restore the unfiltered page. Page filters are represented by the route's `filter` query value, so navigation and the field stay synchronized.
+The extra local Songs search bar has been removed. Clear the top field to restore the unfiltered page. Page filters are represented by the route's `filter` query value, so navigation and the field stay synchronized.
 
 ## Commands
 

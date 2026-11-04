@@ -2,6 +2,7 @@
 import { useSettingsDialog } from "@/settings/useSettingsDialog";
 import { useWindowControls } from "@/composables/useWindowControls";
 import { useThemeStore } from "@/stores/theme";
+import { useLibraryStore } from "@/stores/library";
 import type { DropdownMenuItem } from "@/components/ui/SDropdownMenu.vue";
 import IconSun from "~icons/lucide/sun";
 import IconMoon from "~icons/lucide/moon";
@@ -15,6 +16,7 @@ const router = useRouter();
 const { t } = useI18n();
 const { show: showSettings } = useSettingsDialog();
 const theme = useThemeStore();
+const library = useLibraryStore();
 const { isBorderless } = useWindowControls();
 
 /** 界面缩放弹窗开关 */
@@ -40,16 +42,28 @@ const menuItems = computed<DropdownMenuItem[]>(() => [
     disabled: theme.appearanceStyle === "image",
   },
   { key: "uiZoom", label: t("uiZoom.title"), icon: IconScaling },
+  {
+    key: "fullScan",
+    label: library.scanning ? t("library.scanning") : t("library.scanAll"),
+    icon: IconRefreshCw,
+    disabled: library.scanning || library.scanDirs.length === 0,
+  },
   { key: "reload", label: t("nav.reload"), icon: IconRefreshCw, separator: true },
   { key: "devtools", label: t("nav.devtools"), icon: IconTerminal },
   { key: "settings", label: t("nav.globalSettings"), icon: IconSettings },
 ]);
 
+/**
+ * Run a quick-menu action without navigating away from the current page.
+ * @param key - Selected menu item.
+ */
 const onMenuSelect = (key: string): void => {
   if (key === "theme") theme.cycleMode();
   else if (key === "reload") location.reload();
   else if (key === "devtools") window.api.system.toggleDevTools();
   else if (key === "uiZoom") uiZoomOpen.value = true;
+  else if (key === "fullScan" && !library.scanning && library.scanDirs.length > 0)
+    void library.startScan(false);
   else if (key === "settings") showSettings();
 };
 </script>
@@ -86,7 +100,13 @@ const onMenuSelect = (key: string): void => {
     <div class="flex items-center gap-2 sm:gap-3 shrink-0">
       <SDropdownMenu :items="menuItems" @select="onMenuSelect">
         <template #trigger>
-          <SButton class="app-no-drag shrink-0" variant="tertiary" circle :size="40">
+          <SButton
+            class="app-no-drag shrink-0"
+            variant="tertiary"
+            circle
+            :size="40"
+            :aria-label="t('nav.quickSettings')"
+          >
             <template #icon><IconLucideSettings /></template>
           </SButton>
         </template>

@@ -188,7 +188,7 @@
   },
   "nav": {
     "home": "Home",
-    "library": "Library",
+    "library": "Songs",
     "liked": "Liked Songs",
     "history": "Play History",
     "download": "Downloads",
@@ -199,6 +199,7 @@
     "reload": "Reload",
     "devtools": "Developer Tools",
     "globalSettings": "Global Settings",
+    "quickSettings": "Quick Settings",
     "commandTitle": "Commands",
     "commandHint": "Type a setting, page, or action",
     "commandPages": "Pages",
@@ -408,7 +409,7 @@
     "partialError": "Some library data could not be loaded. Available results are still shown.",
     "showAll": "Show all",
     "scope": {
-      "library": "Search Library…",
+      "library": "Search Songs…",
       "liked": "Search Liked Songs…",
       "collection": "Search this collection…",
       "artist": "Search this artist…",
@@ -749,12 +750,12 @@
     }
   },
   "library": {
-    "title": "Library",
+    "title": "Songs",
     "empty": "Library is empty",
     "emptyHint": "Add a music folder to get started",
     "noLocalData": "No local content",
     "noLocalDataHint": "Add songs to your library to see them aggregated here",
-    "goLibrary": "Go to Library",
+    "goLibrary": "Go to Songs",
     "addFolder": "Add Folder",
     "scanAll": "Full Scan",
     "scanning": "Scanning...",

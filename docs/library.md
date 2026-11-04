@@ -2,7 +2,7 @@
 
 ## Local library
 
-Add music directories during setup or through the library's folder-management controls. Indexing starts automatically when a directory is added, including during setup. It continues in the background after setup; Home's random selection and statistics update when the scan finishes, without opening Library. Setup and Home display scan progress while indexing. Existing directories receive an incremental scan at application startup. Use Library's refresh controls after changing tags or files outside the application.
+Add music directories during setup or through the library's folder-management controls. Indexing starts automatically when a directory is added, including during setup. It continues in the background after setup; Home's random selection and statistics update when the scan finishes, without opening Songs. Setup and Home display scan progress while indexing. Existing directories receive an incremental scan at application startup. Use the refresh controls on Songs after changing tags or files outside the application. **Full Scan** is also available from the quick settings menu when at least one music directory is configured; it is disabled while a scan is running.
 
 These pages describe the same indexed music; they are not separate online catalogs. Liked Songs and local playlists organize that music without a platform login.
 
@@ -10,7 +10,7 @@ These pages describe the same indexed music; they are not separate online catalo
 
 Song-list pages use the shared `SongList` component rather than maintaining independent row layouts. The available columns include track number, title and artist, album, genre, actions, duration, and file size. Context can omit a redundant column, such as Album when viewing a single album. Header and row widths stay aligned, with responsive spacing for narrow views.
 
-The top search field filters the current page. Library does not have a second, competing search field. Search on Home is global instead; see [Search](search.md).
+The top search field filters the current page. Songs does not have a second, competing search field. Search on Home is global instead; see [Search](search.md).
 
 ## Generic Music genre
 

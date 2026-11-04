@@ -25,7 +25,7 @@ These are local library and playback statistics, not online recommendations. Emp
 
 ## Organize and find music
 
-- **Library** shows indexed local songs.
+- **Songs** shows indexed local songs.
 - **Artists**, **Albums**, **Genres**, and **Folders** offer different views of that library.
 - **Liked Songs** holds locally liked tracks; personal playlists remain available.
 - **Media Sources** manages your own servers.

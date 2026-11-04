@@ -188,7 +188,7 @@
   },
   "nav": {
     "home": "首页",
-    "library": "音乐库",
+    "library": "歌曲",
     "liked": "我喜欢的音乐",
     "history": "播放历史",
     "download": "下载管理",
@@ -199,6 +199,7 @@
     "reload": "热重载",
     "devtools": "开发者工具",
     "globalSettings": "全局设置",
+    "quickSettings": "快捷设置",
     "commandTitle": "命令",
     "commandHint": "输入设置、页面或操作",
     "commandPages": "页面",
@@ -408,7 +409,7 @@
     "partialError": "部分音乐库数据未能加载，仍会显示可用的结果。",
     "showAll": "查看全部",
     "scope": {
-      "library": "搜索音乐库…",
+      "library": "搜索歌曲…",
       "liked": "搜索喜欢的歌曲…",
       "collection": "搜索此集合…",
       "artist": "搜索此歌手…",
@@ -749,12 +750,12 @@
     }
   },
   "library": {
-    "title": "音乐库",
+    "title": "歌曲",
     "empty": "音乐库为空",
     "emptyHint": "添加音乐文件夹开始使用",
     "noLocalData": "暂无本地内容",
     "noLocalDataHint": "前往音乐库添加歌曲后将自动聚合",
-    "goLibrary": "前往音乐库",
+    "goLibrary": "前往歌曲",
     "addFolder": "添加文件夹",
     "scanAll": "全量扫描",
     "scanning": "正在扫描...",
