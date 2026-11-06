@@ -10,14 +10,21 @@ const mocks = vi.hoisted(() => ({
   insert: vi.fn(),
   play: vi.fn(),
   success: vi.fn(),
+  error: vi.fn(),
+  copy: vi.fn(),
+  push: vi.fn(),
+  showInExplorer: vi.fn(),
+  copyTrackFile: vi.fn(),
   length: { value: 3 },
 }));
 vi.mock("@/core/player", () => ({ insertToQueue: mocks.insert, playNow: mocks.play }));
 vi.mock("@/stores/queue", () => ({ queueLength: mocks.length }));
 vi.mock("@/stores/status", () => ({ useStatusStore: () => ({}) }));
-vi.mock("vue-router", () => ({ useRouter: () => ({ push: vi.fn() }) }));
-vi.mock("@/composables/useCopyText", () => ({ useCopyText: () => ({ copy: vi.fn() }) }));
-vi.mock("@/composables/useToast", () => ({ toast: { success: mocks.success } }));
+vi.mock("vue-router", () => ({ useRouter: () => ({ push: mocks.push }) }));
+vi.mock("@/composables/useCopyText", () => ({ useCopyText: () => ({ copy: mocks.copy }) }));
+vi.mock("@/composables/useToast", () => ({
+  toast: { success: mocks.success, error: mocks.error },
+}));
 
 const track = ref<Track | null>({
   id: "song",
@@ -46,8 +53,69 @@ const setup = (options: TrackMenuOptions = {}) => {
 };
 beforeEach(() => {
   vi.clearAllMocks();
+  Object.assign(window, {
+    api: { system: { showInExplorer: mocks.showInExplorer, copyTrackFile: mocks.copyTrackFile } },
+  });
   mocks.length.value = 3;
   track.value = { id: "song", source: "local", title: "Song", artists: [], duration: 180000 };
+});
+
+describe("song menu More submenu", () => {
+  it("moves local file and search actions under More while keeping edit and delete at the top level", () => {
+    const { menu, wrapper } = setup({ onEditTags: vi.fn() });
+    const visible = menu.items.value.filter((item) => item.show !== false);
+    const more = visible.find((item) => item.key === "more");
+    expect(visible.map((item) => item.key)).toEqual([
+      "play",
+      "playNext",
+      "addToQueue",
+      "addToPlaylist",
+      "editTags",
+      "deleteFile",
+      "more",
+    ]);
+    expect(more?.children?.filter((item) => item.show !== false).map((item) => item.key)).toEqual([
+      "showInExplorer",
+      "copyFile",
+      "copyPath",
+      "searchSame",
+      "copyTitle",
+    ]);
+    wrapper.unmount();
+  });
+
+  it("retains search but hides local-only actions for server tracks", () => {
+    track.value!.source = "streaming";
+    const { menu, wrapper } = setup();
+    const more = menu.items.value.find((item) => item.key === "more");
+    expect(more?.children?.filter((item) => item.show !== false).map((item) => item.key)).toEqual([
+      "searchSame",
+      "copyTitle",
+      "copyId",
+    ]);
+    wrapper.unmount();
+  });
+
+  it("dispatches the moved actions and uses the CUE audio path", async () => {
+    track.value = {
+      ...track.value!,
+      path: "/music/album.cue",
+      cuePath: "/music/album.cue",
+      cueAudioPath: "/music/album.flac",
+    };
+    mocks.copyTrackFile.mockResolvedValue(true);
+    const { menu, wrapper } = setup();
+    await menu.handleSelect("showInExplorer");
+    await menu.handleSelect("copyFile");
+    await menu.handleSelect("copyPath");
+    await menu.handleSelect("searchSame");
+    expect(mocks.showInExplorer).toHaveBeenCalledWith("/music/album.flac");
+    expect(mocks.copyTrackFile).toHaveBeenCalledWith(track.value);
+    expect(mocks.success).toHaveBeenCalledWith("Copied");
+    expect(mocks.copy).toHaveBeenCalledWith("/music/album.flac");
+    expect(mocks.push).toHaveBeenCalledWith({ path: "/search", query: { q: "Song" } });
+    wrapper.unmount();
+  });
 });
 
 describe("song menu queue actions", () => {

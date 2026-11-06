@@ -92,29 +92,10 @@ export const useTrackMenu = (
         show: canAddToPlaylist,
       },
       {
-        key: "showInExplorer",
-        label: t("songList.context.showInExplorer"),
-        icon: markRaw(IconFolderOpen),
-        separator: true,
-        show: isLocal,
-      },
-      {
-        key: "copyFile",
-        label: t("songList.context.copyFile"),
-        icon: markRaw(IconCopy),
-        separator: !isLocal,
-        show: isLocal,
-      },
-      {
-        key: "copyPath",
-        label: t("songList.context.copyPath"),
-        icon: markRaw(IconCopy),
-        show: isLocal,
-      },
-      {
         key: "editTags",
         label: t("songList.context.editTags"),
         icon: markRaw(IconSquarePen),
+        separator: true,
         show: isLocal && !isCue && !!options.onEditTags,
       },
       {
@@ -139,16 +120,34 @@ export const useTrackMenu = (
         show: showCloudRemove,
       },
       {
-        key: "searchSame",
-        label: t("songList.context.searchSame"),
-        icon: markRaw(IconSearch),
-        separator: true,
-      },
-      {
         key: "more",
         label: t("songList.context.more"),
         icon: markRaw(IconMoreHorizontal),
+        separator: true,
         children: [
+          {
+            key: "showInExplorer",
+            label: t("songList.context.showInExplorer"),
+            icon: markRaw(IconFolderOpen),
+            show: isLocal,
+          },
+          {
+            key: "copyFile",
+            label: t("songList.context.copyFile"),
+            icon: markRaw(IconCopy),
+            show: isLocal,
+          },
+          {
+            key: "copyPath",
+            label: t("songList.context.copyPath"),
+            icon: markRaw(IconCopy),
+            show: isLocal,
+          },
+          {
+            key: "searchSame",
+            label: t("songList.context.searchSame"),
+            icon: markRaw(IconSearch),
+          },
           {
             key: "copyTitle",
             label: t("songList.context.copyTitle"),
