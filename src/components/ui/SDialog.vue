@@ -9,6 +9,8 @@ export interface SDialogProps {
   modal?: boolean;
   /** 标题（无障碍必需，不传则隐藏标题区） */
   title?: string;
+  /** Optional title styling; defaults to the standard dialog heading. */
+  titleClass?: string;
   /** 描述文本 */
   description?: string;
   /** 是否显示关闭按钮 */
@@ -135,7 +137,7 @@ const setOpen = (val: boolean): void => {
       >
         <!-- 标题 + 描述 -->
         <div v-if="title" class="shrink-0 px-5 pt-4 pb-3 pr-12">
-          <DialogTitle class="text-lg font-semibold">{{ title }}</DialogTitle>
+          <DialogTitle :class="['font-semibold', titleClass || 'text-lg']">{{ title }}</DialogTitle>
           <DialogDescription
             v-if="description"
             :class="['text-xs mt-1', cover ? 'text-cover/50' : 'text-on-surface/50']"

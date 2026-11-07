@@ -617,6 +617,7 @@
   },
   "quality": {
     "outputInfo": "输出信息",
+    "songInfo": "歌曲信息",
     "outputSection": "输出信息",
     "outputMode": "输出模式",
     "dspSection": "音频处理",

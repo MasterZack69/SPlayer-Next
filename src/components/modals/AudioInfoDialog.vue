@@ -9,27 +9,24 @@ const media = useMediaStore();
 const status = useStatusStore();
 const settings = useSettingsStore();
 
-/** 从原生音频引擎读取的真实流与硬件参数 */
+/** Current source and negotiated output-stream parameters. */
 const streamInfo = ref<AudioStreamInfo | null>(null);
 
-/** 获取底层真实流信息 */
-const fetchStreamInfo = async () => {
-  try {
-    const res = await window.api.player.getStreamInfo();
-    if (res?.success && res.data) {
-      streamInfo.value = res.data;
-    }
-  } catch {
-    streamInfo.value = null;
-  }
-};
-
-// 弹窗打开或播放状态变化时刷新真实底层数据
+// Discard old responses when the track, playback state, or dialog visibility changes.
 watch(
   () => [status.audioInfoOpen, status.state, media.track?.id],
-  ([open]) => {
-    if (open) {
-      void fetchStreamInfo();
+  async ([open], _previous, onCleanup) => {
+    let current = true;
+    onCleanup(() => {
+      current = false;
+    });
+    streamInfo.value = null;
+    if (!open) return;
+    try {
+      const res = await window.api.player.getStreamInfo();
+      if (current) streamInfo.value = res?.success && res.data ? res.data : null;
+    } catch {
+      if (current) streamInfo.value = null;
     }
   },
   { immediate: true },
@@ -96,24 +93,14 @@ const formatChannels = (channelCount?: number): string => {
   return `${t("quality.multiChannel")} · ${channelCount}`;
 };
 
-/** 核心参数小卡片数据 */
+/** Song metadata cards; never substitute output-stream values. */
 const coreCards = computed(() => {
   const currentQuality = quality.value;
-  const currentStream = streamInfo.value;
-
-  const outputSampleRate = currentStream?.outputSampleRate || currentQuality?.sampleRate;
-  const outputBitDepth =
-    currentStream?.outputBits ||
-    (currentQuality?.bitsPerSample && currentQuality.bitsPerSample > 0
-      ? currentQuality.bitsPerSample
-      : 0);
-  const outputChannels = currentStream?.outputChannels || currentQuality?.channels;
-
   return [
-    { label: t("quality.sampleRate"), value: formatSampleRate(outputSampleRate) },
-    { label: t("quality.bitDepth"), value: formatBitDepth(outputBitDepth) },
+    { label: t("quality.sampleRate"), value: formatSampleRate(currentQuality?.sampleRate) },
+    { label: t("quality.bitDepth"), value: formatBitDepth(currentQuality?.bitsPerSample) },
     { label: t("quality.bitRate"), value: formatBitRate(currentQuality?.bitRate) },
-    { label: t("quality.channels"), value: formatChannels(outputChannels) },
+    { label: t("quality.codec"), value: codecText.value },
   ];
 });
 
@@ -207,7 +194,12 @@ const sections = computed<InfoSection[]>(() => [
   {
     title: t("quality.outputSection"),
     items: [
-      { label: t("quality.codec"), value: codecText.value },
+      {
+        label: t("quality.sampleRate"),
+        value: formatSampleRate(streamInfo.value?.outputSampleRate),
+      },
+      { label: t("quality.bitDepth"), value: formatBitDepth(streamInfo.value?.outputBits) },
+      { label: t("quality.channels"), value: formatChannels(streamInfo.value?.outputChannels) },
       { label: t("quality.resampling"), value: resamplingStatusText.value },
       { label: t("settings.outputDevice.label"), value: currentDeviceName.value, colSpan: true },
     ],
@@ -227,12 +219,13 @@ const sections = computed<InfoSection[]>(() => [
 <template>
   <SDialog
     v-model:open="status.audioInfoOpen"
-    :title="t('quality.outputInfo')"
-    width="460px"
+    :title="t('quality.songInfo')"
+    title-class="text-sm tracking-wide"
+    width="min(460px, calc(100vw - 24px))"
     destroy-on-close
   >
     <div class="flex flex-col gap-4">
-      <div class="grid grid-cols-4 gap-2">
+      <div class="song-info-cards grid grid-cols-4 gap-2">
         <SCard
           v-for="card in coreCards"
           :key="card.label"
@@ -241,10 +234,13 @@ const sections = computed<InfoSection[]>(() => [
           variant="settings"
           class="flex flex-col items-center justify-center text-center"
         >
-          <span class="text-xs text-on-surface-variant truncate w-full">
+          <span class="text-xs text-on-surface-variant truncate w-full" :title="card.label">
             {{ card.label }}
           </span>
-          <span class="text-sm font-semibold text-on-surface tabular-nums mt-0.5 truncate w-full">
+          <span
+            class="text-sm font-semibold text-on-surface tabular-nums mt-0.5 truncate w-full"
+            :title="card.value"
+          >
             {{ card.value }}
           </span>
         </SCard>
@@ -278,3 +274,11 @@ const sections = computed<InfoSection[]>(() => [
     </template>
   </SDialog>
 </template>
+
+<style scoped>
+@media (max-width: 499px) {
+  .song-info-cards {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+</style>

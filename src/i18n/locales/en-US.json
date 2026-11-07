@@ -617,6 +617,7 @@
   },
   "quality": {
     "outputInfo": "Output Information",
+    "songInfo": "Song Information",
     "outputSection": "Output Information",
     "outputMode": "Output Mode",
     "dspSection": "Audio Processing",
