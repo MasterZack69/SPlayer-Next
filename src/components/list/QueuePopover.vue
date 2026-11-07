@@ -97,7 +97,9 @@ const onClear = (): void => {
               :class="[
                 index === statusStore.playIndex
                   ? 'bg-primary/15 text-primary'
-                  : 'hover:bg-on-surface/8 active:bg-on-surface/14',
+                  : isDragging
+                    ? ''
+                    : 'hover:bg-on-surface/8 active:bg-on-surface/14',
               ]"
               @click="onPlay(index)"
             >

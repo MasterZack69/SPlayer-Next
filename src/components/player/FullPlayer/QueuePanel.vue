@@ -95,7 +95,9 @@ const {
               :class="[
                 index === statusStore.playIndex
                   ? 'bg-cover/14 text-cover'
-                  : 'hover:bg-cover/8 active:bg-cover/12',
+                  : isDragging
+                    ? ''
+                    : 'hover:bg-cover/8 active:bg-cover/12',
               ]"
               @click="playAt(index)"
             >

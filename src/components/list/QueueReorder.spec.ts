@@ -144,6 +144,38 @@ describe.each([
     wrapper.unmount();
   });
 
+  it.each(["drop", "cancel"] as const)(
+    "suppresses row hover while dragging and restores it after %s",
+    async (end) => {
+      const wrapper = setupQueue(component);
+      const row = wrapper.findAll("[data-queue-row]")[2];
+      const current = wrapper.findAll("[data-queue-row]")[1];
+      const hover = component === QueuePanel ? "hover:bg-cover/8" : "hover:bg-on-surface/8";
+      const active = component === QueuePanel ? "active:bg-cover/12" : "active:bg-on-surface/14";
+      const playing = component === QueuePanel ? "bg-cover/14" : "bg-primary/15";
+      expect(row.classes()).toContain(hover);
+      expect(row.classes()).toContain(active);
+      expect(current.classes()).toContain(playing);
+
+      await wrapper.find(".queue-drag-handle").trigger("mousedown", {
+        clientX: 20,
+        clientY: 20,
+        button: 0,
+      });
+      expect(row.classes()).not.toContain(hover);
+      expect(row.classes()).not.toContain(active);
+      expect(current.classes()).toContain(playing);
+
+      if (end === "drop") window.dispatchEvent(new MouseEvent("mouseup"));
+      else window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
+      await nextTick();
+      expect(row.classes()).toContain(hover);
+      expect(row.classes()).toContain(active);
+      expect(current.classes()).toContain(playing);
+      wrapper.unmount();
+    },
+  );
+
   it("cancels a drag if queue entries change before the drop", async () => {
     const wrapper = setupQueue(component);
     await wrapper.find(".queue-drag-handle").trigger("mousedown", { clientX: 20, clientY: 20 });
