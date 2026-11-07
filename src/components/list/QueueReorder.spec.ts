@@ -150,12 +150,14 @@ describe.each([
       const wrapper = setupQueue(component);
       const row = wrapper.findAll("[data-queue-row]")[2];
       const current = wrapper.findAll("[data-queue-row]")[1];
+      const removeButton = row.findAll("button")[1];
       const hover = component === QueuePanel ? "hover:bg-cover/8" : "hover:bg-on-surface/8";
       const active = component === QueuePanel ? "active:bg-cover/12" : "active:bg-on-surface/14";
       const playing = component === QueuePanel ? "bg-cover/14" : "bg-primary/15";
       expect(row.classes()).toContain(hover);
       expect(row.classes()).toContain(active);
       expect(current.classes()).toContain(playing);
+      expect(removeButton.classes()).toContain("group-hover:opacity-100");
 
       await wrapper.find(".queue-drag-handle").trigger("mousedown", {
         clientX: 20,
@@ -165,6 +167,9 @@ describe.each([
       expect(row.classes()).not.toContain(hover);
       expect(row.classes()).not.toContain(active);
       expect(current.classes()).toContain(playing);
+      expect(removeButton.classes()).not.toContain("group-hover:opacity-100");
+      expect(removeButton.classes()).toContain("opacity-0");
+      expect(removeButton.classes()).toContain("pointer-events-none");
 
       if (end === "drop") window.dispatchEvent(new MouseEvent("mouseup"));
       else window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
@@ -172,6 +177,8 @@ describe.each([
       expect(row.classes()).toContain(hover);
       expect(row.classes()).toContain(active);
       expect(current.classes()).toContain(playing);
+      expect(removeButton.classes()).toContain("group-hover:opacity-100");
+      expect(removeButton.classes()).not.toContain("pointer-events-none");
       wrapper.unmount();
     },
   );

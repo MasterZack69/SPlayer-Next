@@ -140,7 +140,8 @@ const {
                 variant="ghost"
                 circle
                 size="tiny"
-                class="opacity-0 group-hover:opacity-100"
+                class="opacity-0"
+                :class="isDragging ? 'pointer-events-none' : 'group-hover:opacity-100'"
                 @click.stop="removeAt(index)"
               >
                 <template #icon><IconLucideX /></template>
